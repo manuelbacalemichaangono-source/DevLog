@@ -46,7 +46,7 @@ export const ReservationsView: React.FC<ReservationsViewProps> = () => {
             Exemplaires Réservés & Mis de côté ({activeReservations.length})
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Un exemplaire réservé passe à <strong>« Réservé »</strong> (orange). Dès qu'il est retiré par l'adhérent, il passe à <strong>« Non disponible »</strong>.
+            Un exemplaire réservé passe à <strong>« Réservé »</strong> (orange). Dès qu'il est retiré par l'adhérent, il passe à <strong>« Indisponible »</strong>.
           </p>
         </div>
 
@@ -105,7 +105,7 @@ export const ReservationsView: React.FC<ReservationsViewProps> = () => {
                       ) : res.status === 'Retiré' ? (
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800 border border-rose-300 inline-flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3" />
-                          <span>Retiré (Non disponible)</span>
+                          <span>Retiré (Indisponible)</span>
                         </span>
                       ) : (
                         <span className="text-slate-400">Annulée (Disponible)</span>
@@ -117,7 +117,7 @@ export const ReservationsView: React.FC<ReservationsViewProps> = () => {
                           <button
                             onClick={() => claimReservation(res.id)}
                             className="px-2.5 py-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded transition-colors inline-flex items-center gap-1"
-                            title="L'adhérent retire le livre : passe à Non disponible"
+                            title="L'adhérent retire le livre : passe à Indisponible"
                           >
                             <span>Retirer le prêt</span>
                             <ArrowRight className="w-3 h-3" />

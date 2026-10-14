@@ -30,7 +30,17 @@ interface PhysicalLibraryBrowserProps {
   onOpenReserveCopyModal?: (book: Book, copy: BookCopy) => void;
 }
 
-type NavigationLevel = 1 | 2 | 3 | 4 | 5;
+export type NavigationLevel = 1 | 2 | 3 | 4 | 5;
+
+interface PhysicalLibraryBrowserProps {
+  onQuickLoanBookCopy: (book: Book, copy?: BookCopy) => void;
+  onSelectBookForDetail: (book: Book) => void;
+  onOpenNewBook: () => void;
+  onOpenReturnBook: () => void;
+  onOpenReserveCopyModal?: (book: Book, copy: BookCopy) => void;
+  level?: NavigationLevel;
+  onLevelChange?: (level: NavigationLevel) => void;
+}
 
 export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
   onQuickLoanBookCopy,
@@ -38,6 +48,8 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
   onOpenNewBook,
   onOpenReturnBook,
   onOpenReserveCopyModal,
+  level: externalLevel,
+  onLevelChange,
 }) => {
   const {
     sections,
@@ -50,7 +62,14 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
 
   // Consultation en 5 niveaux physiques
   // 1. Sections -> 2. Thématiques -> 3. Étagères -> 4. Livres -> 5. Exemplaires
-  const [level, setLevel] = useState<NavigationLevel>(1);
+  const [internalLevel, setInternalLevel] = useState<NavigationLevel>(1);
+  const level = externalLevel !== undefined ? externalLevel : internalLevel;
+
+  const updateLevel = (newLevel: NavigationLevel) => {
+    setInternalLevel(newLevel);
+    onLevelChange?.(newLevel);
+  };
+
   const [selectedSection, setSelectedSection] = useState<LibrarySection | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<LibraryTheme | null>(null);
   const [selectedShelf, setSelectedShelf] = useState<LibraryShelf | null>(null);
@@ -62,40 +81,40 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
     setSelectedTheme(null);
     setSelectedShelf(null);
     setSelectedBook(null);
-    setLevel(2);
+    updateLevel(2);
   };
 
   const handleSelectTheme = (thm: LibraryTheme) => {
     setSelectedTheme(thm);
     setSelectedShelf(null);
     setSelectedBook(null);
-    setLevel(3);
+    updateLevel(3);
   };
 
   const handleSelectShelf = (shf: LibraryShelf) => {
     setSelectedShelf(shf);
     setSelectedBook(null);
-    setLevel(4);
+    updateLevel(4);
   };
 
   const handleSelectBook = (bk: Book) => {
     setSelectedBook(bk);
-    setLevel(5);
+    updateLevel(5);
   };
 
   const handleGoBack = () => {
     if (level === 5) {
       setSelectedBook(null);
-      setLevel(4);
+      updateLevel(4);
     } else if (level === 4) {
       setSelectedShelf(null);
-      setLevel(3);
+      updateLevel(3);
     } else if (level === 3) {
       setSelectedTheme(null);
-      setLevel(2);
+      updateLevel(2);
     } else if (level === 2) {
       setSelectedSection(null);
-      setLevel(1);
+      updateLevel(1);
     }
   };
 
@@ -116,7 +135,7 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
     } else if (targetLevel === 4) {
       setSelectedBook(null);
     }
-    setLevel(targetLevel);
+    updateLevel(targetLevel);
   };
 
   // Sélections actives et livres correspondants
@@ -130,34 +149,6 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* ======================================================== */}
-      {/* 1. BARRE D'ACTIONS SOUS L'EN-TÊTE (SEULEMENT NIVEAU 1)    */}
-      {/* Deux boutons bien séparés, de même taille :             */}
-      {/* « Ranger un livre » et « Retourner un livre ».           */}
-      {/* Sur mobile, ils tiennent sur une ligne ou s'empilent.    */}
-      {/* Ne se répète PAS dans la navigation (niveaux 2, 3, 4, 5).*/}
-      {/* ======================================================== */}
-      {level === 1 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full">
-          <button
-            type="button"
-            onClick={onOpenNewBook}
-            className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm active:scale-[0.99] border border-slate-800 cursor-pointer"
-          >
-            <BookPlus className="w-4 h-4 shrink-0 text-indigo-400" />
-            <span>Ranger un livre</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenReturnBook}
-            className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-sm active:scale-[0.99] border border-indigo-700 cursor-pointer"
-          >
-            <RotateCcw className="w-4 h-4 shrink-0 text-white" />
-            <span>Retourner un livre</span>
-          </button>
-        </div>
-      )}
 
       {/* ======================================================== */}
       {/* 2. PANNEAU D'ORIENTATION ET FIL D'ARIANE PHYSIQUE         */}
@@ -476,9 +467,7 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
                 {shelfBooks.map((book) => {
                   const copies = book.copies || [];
                   const countDisp = copies.filter((c) => c.status === 'Disponible').length;
-                  const countIndisp = copies.filter(
-                    (c) => c.status === 'Indisponible' || c.status === 'Non disponible'
-                  ).length;
+                  const countIndisp = copies.filter((c) => c.status === 'Indisponible').length;
                   const countRes = copies.filter((c) => c.status === 'Réservé').length;
 
                   return (
@@ -624,7 +613,7 @@ export const PhysicalLibraryBrowser: React.FC<PhysicalLibraryBrowserProps> = ({
             <div className="space-y-3">
               {(currentLiveBook.copies || []).map((copy) => {
                 const isDisponible = copy.status === 'Disponible';
-                const isIndisponible = copy.status === 'Indisponible' || copy.status === 'Non disponible';
+                const isIndisponible = copy.status === 'Indisponible';
                 const isReserve = copy.status === 'Réservé';
 
                 const activeRes = reservations.find(

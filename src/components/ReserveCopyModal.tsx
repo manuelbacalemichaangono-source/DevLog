@@ -59,7 +59,7 @@ export const ReserveCopyModal: React.FC<ReserveCopyModalProps> = ({
 
           <div>
             <label className="block font-semibold text-slate-800 mb-1.5">
-              Choisir l'adhérent qui réserve l'ouvrage :
+              Choisir l'étudiant inscrit qui réserve l'ouvrage :
             </label>
             <select
               value={selectedMemberId}
@@ -67,10 +67,10 @@ export const ReserveCopyModal: React.FC<ReserveCopyModalProps> = ({
               required
               className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-slate-900 text-xs"
             >
-              <option value="">-- Sélectionnez un adhérent actif --</option>
-              {activeMembers.map((m) => (
+              <option value="">-- Sélectionnez un étudiant inscrit --</option>
+              {members.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.firstName} {m.lastName} ({m.memberNumber})
+                  {m.firstName} {m.lastName} (Matricule : {m.memberNumber})
                 </option>
               ))}
             </select>

@@ -109,10 +109,10 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
           {/* Step 1: Select Member */}
           <div>
             <label className="block font-semibold text-slate-800 mb-1.5 flex items-center justify-between">
-              <span>1. Adhérent emprunteur</span>
+              <span>1. Étudiant inscrit emprunteur</span>
               {selectedMember && (
                 <span className="font-normal text-slate-500">
-                  Prêts : {memberActiveLoansCount}/{selectedMember.maxLoans}
+                  Prêts : {memberActiveLoansCount}/{selectedMember.maxLoans || 5}
                 </span>
               )}
             </label>
@@ -123,18 +123,19 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
               required
               className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:ring-1 focus:ring-indigo-500"
             >
-              <option value="">-- Choisir un adhérent dans le registre --</option>
+              <option value="">-- Choisir un étudiant inscrit --</option>
               {members.map((m) => {
                 const count = loans.filter((l) => l.memberId === m.id && l.status !== 'Rendu').length;
-                const isFull = count >= m.maxLoans;
-                const isInactive = m.status !== 'Actif';
+                const maxAllowed = m.maxLoans || 5;
+                const isFull = count >= maxAllowed;
+                const isInactive = m.status && m.status !== 'Actif';
                 return (
                   <option
                     key={m.id}
                     value={m.id}
-                    disabled={isFull || isInactive}
+                    disabled={isFull || !!isInactive}
                   >
-                    {m.firstName} {m.lastName} ({m.memberNumber}) · {m.category} [{count}/{m.maxLoans} prêts]{isInactive ? ` - ${m.status}` : ''}
+                    {m.firstName} {m.lastName} (Matricule : {m.memberNumber}) [{count} prêt(s)]
                   </option>
                 );
               })}
@@ -289,7 +290,7 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
           <div className="bg-rose-50/60 rounded-lg p-3 border border-rose-200 text-xs text-rose-900 space-y-1">
             <div className="font-semibold flex items-center gap-1.5 text-rose-800">
               <span className="w-2 h-2 rounded-full bg-rose-600"></span>
-              <span>Passage immédiat à l'état « Non disponible »</span>
+              <span>Passage immédiat à l'état « Indisponible »</span>
             </div>
             <p className="text-[11px] text-rose-700 leading-relaxed">
               Une fois le prêt validé, cet exemplaire sera marqué comme prêté et ne pourra plus être emprunté par un autre adhérent jusqu'à son retour en rayon.

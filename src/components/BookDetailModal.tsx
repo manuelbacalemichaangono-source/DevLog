@@ -121,7 +121,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
             <div className="space-y-2">
               {(book.copies || []).map((copy) => {
                 const isDisponible = copy.status === 'Disponible';
-                const isNonDisponible = copy.status === 'Non disponible';
+                const isIndisponible = copy.status === 'Indisponible' || (copy.status as string) === 'Non disponible';
                 const isReserve = copy.status === 'Réservé';
 
                 return (
@@ -138,10 +138,10 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
                             <span>Disponible</span>
                           </span>
                         )}
-                        {isNonDisponible && (
+                        {isIndisponible && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-800 border border-rose-300 inline-flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
-                            <span>Non disponible</span>
+                            <span>Indisponible</span>
                           </span>
                         )}
                         {isReserve && (
@@ -156,7 +156,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
                         <span className="font-mono">{copy.barcode}</span>
                         <span aria-hidden="true">·</span>
                         <span>État : {copy.condition}</span>
-                        {isNonDisponible && copy.borrowerName && (
+                        {isIndisponible && copy.borrowerName && (
                           <>
                             <span aria-hidden="true">·</span>
                             <span className="text-rose-700 font-medium">Prêté à {copy.borrowerName}</span>

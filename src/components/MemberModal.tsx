@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, UserPlus, Users } from 'lucide-react';
+import { X, UserPlus, GraduationCap, Check } from 'lucide-react';
 import { useLibrary } from '../context/LibraryContext';
-import { Member, MemberCategory, MemberStatus } from '../types/library';
+import { Member } from '../types/library';
 
 interface MemberModalProps {
   isOpen: boolean;
@@ -14,75 +14,68 @@ export const MemberModal: React.FC<MemberModalProps> = ({
   onClose,
   memberToEdit,
 }) => {
-  const { addMember, updateMember, settings } = useLibrary();
+  const { addMember, updateMember, members } = useLibrary();
 
-  const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [category, setCategory] = useState<MemberCategory>('Adulte');
-  const [status, setStatus] = useState<MemberStatus>('Actif');
-  const [expiryDate, setExpiryDate] = useState('');
-  const [maxLoans, setMaxLoans] = useState<number>(settings.defaultMaxLoans);
-  const [notes, setNotes] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [memberNumber, setMemberNumber] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (memberToEdit) {
-      setFirstName(memberToEdit.firstName);
-      setLastName(memberToEdit.lastName);
-      setEmail(memberToEdit.email);
-      setPhone(memberToEdit.phone);
-      setCategory(memberToEdit.category);
-      setStatus(memberToEdit.status);
-      setExpiryDate(memberToEdit.expiryDate);
-      setMaxLoans(memberToEdit.maxLoans);
-      setNotes(memberToEdit.notes || '');
+      setLastName(memberToEdit.lastName || '');
+      setFirstName(memberToEdit.firstName || '');
+      setMemberNumber(memberToEdit.memberNumber || '');
+      setError(null);
     } else {
-      const nextYear = new Date();
-      nextYear.setFullYear(nextYear.getFullYear() + 1);
-      const defExp = nextYear.toISOString().split('T')[0];
-
-      setFirstName('');
+      const year = new Date().getFullYear();
+      const nextNum = members.length + 1;
+      const defaultMatricule = `ETU-${year}-${String(nextNum).padStart(3, '0')}`;
       setLastName('');
-      setEmail('');
-      setPhone('');
-      setCategory('Adulte');
-      setStatus('Actif');
-      setExpiryDate(defExp);
-      setMaxLoans(settings.defaultMaxLoans);
-      setNotes('');
+      setFirstName('');
+      setMemberNumber(defaultMatricule);
+      setError(null);
     }
-  }, [memberToEdit, isOpen, settings.defaultMaxLoans]);
+  }, [memberToEdit, isOpen, members.length]);
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firstName.trim() || !lastName.trim() || !email.trim()) return;
+    setError(null);
+
+    const cleanNom = lastName.trim();
+    const cleanPrenom = firstName.trim();
+    const cleanMatricule = memberNumber.trim().toUpperCase();
+
+    if (!cleanNom || !cleanPrenom || !cleanMatricule) {
+      setError('Veuillez renseigner le nom, le prénom et le numéro de matricule.');
+      return;
+    }
+
+    // Vérifier l'unicité du matricule
+    const duplicate = members.find(
+      (m) =>
+        m.memberNumber.trim().toUpperCase() === cleanMatricule &&
+        m.id !== memberToEdit?.id
+    );
+
+    if (duplicate) {
+      setError(`Le numéro de matricule "${cleanMatricule}" est déjà attribué à un autre étudiant.`);
+      return;
+    }
 
     if (memberToEdit) {
       updateMember(memberToEdit.id, {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
-        phone: phone.trim() || 'Non renseigné',
-        category,
-        status,
-        expiryDate,
-        maxLoans: Number(maxLoans),
-        notes: notes.trim(),
+        lastName: cleanNom,
+        firstName: cleanPrenom,
+        memberNumber: cleanMatricule,
       });
     } else {
       addMember({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
-        phone: phone.trim() || '06 00 00 00 00',
-        category,
-        expiryDate,
-        status,
-        maxLoans: Number(maxLoans),
-        notes: notes.trim(),
+        lastName: cleanNom,
+        firstName: cleanPrenom,
+        memberNumber: cleanMatricule,
       });
     }
 
@@ -91,149 +84,98 @@ export const MemberModal: React.FC<MemberModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl border border-slate-200 max-w-lg w-full p-5 sm:p-6 shadow-2xl relative">
+      <div className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-5 sm:p-6 shadow-2xl relative">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <UserPlus className="w-5 h-5 text-indigo-600" />
+            <GraduationCap className="w-5 h-5 text-indigo-600" />
             <h3 className="text-sm font-bold text-slate-900">
-              {memberToEdit ? 'Modifier le dossier adhérent' : 'Inscrire un nouvel adhérent'}
+              {memberToEdit ? 'Modifier l’étudiant inscrit' : 'Inscrire un étudiant'}
             </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
+            aria-label="Fermer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Form Body */}
+        {/* Info reminder */}
+        <p className="text-xs text-slate-500 mt-3">
+          Seuls les étudiants inscrits figurant dans cette liste sont autorisés à emprunter ou réserver des livres dans la bibliothèque.
+        </p>
+
+        {error && (
+          <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs">
+            {error}
+          </div>
+        )}
+
+        {/* Form Body - Only Nom, Prénom, Numéro de matricule */}
         <form onSubmit={handleSubmit} className="py-4 space-y-4 text-xs">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Prénom *</label>
-              <input
-                type="text"
-                required
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Ex : Camille"
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Nom de famille *</label>
-              <input
-                type="text"
-                required
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Ex : Martin"
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Adresse email *</label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="nom@exemple.fr"
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Téléphone</label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="06 12 34 56 78"
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Catégorie tarifaire *</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as MemberCategory)}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-              >
-                <option value="Adulte">Adulte</option>
-                <option value="Étudiant">Étudiant</option>
-                <option value="Enseignant">Enseignant</option>
-                <option value="Enfant">Enfant</option>
-                <option value="Senior">Senior</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Statut d'adhésion</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as MemberStatus)}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-              >
-                <option value="Actif">Actif</option>
-                <option value="Suspendu">Suspendu</option>
-                <option value="Expiré">Expiré</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Date d'expiration de la carte</label>
-              <input
-                type="date"
-                required
-                value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-800 mb-1">Quota max de prêts simultanés</label>
-              <input
-                type="number"
-                min="1"
-                max="20"
-                value={maxLoans}
-                onChange={(e) => setMaxLoans(Number(e.target.value))}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-mono"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="block font-semibold text-slate-800 mb-1">Notes & Observations</label>
-              <textarea
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Centres d'intérêt, remarques de gestion..."
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900"
-              />
-            </div>
+          <div>
+            <label className="block font-semibold text-slate-800 mb-1">
+              Numéro de matricule (identifiant unique) *
+            </label>
+            <input
+              type="text"
+              required
+              value={memberNumber}
+              onChange={(e) => setMemberNumber(e.target.value.toUpperCase())}
+              placeholder="Ex : ETU-2024-001"
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-mono font-bold tracking-wide focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Identifiant unique demandé lors de l'emprunt ou de la réservation.
+            </span>
           </div>
 
+          <div>
+            <label className="block font-semibold text-slate-800 mb-1">
+              Nom de famille *
+            </label>
+            <input
+              type="text"
+              required
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder="Ex : Martin"
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-800 mb-1">
+              Prénom *
+            </label>
+            <input
+              type="text"
+              required
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="Ex : Thomas"
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* Action Buttons */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg"
+              className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
             >
               Annuler
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-sm"
+              className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
-              {memberToEdit ? 'Enregistrer les modifications' : 'Créer la carte adhérent'}
+              <Check className="w-4 h-4" />
+              <span>{memberToEdit ? 'Enregistrer les modifications' : 'Confirmer l’inscription'}</span>
             </button>
           </div>
         </form>

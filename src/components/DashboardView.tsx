@@ -52,7 +52,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {settings.libraryName}
             </h3>
             <p className="text-xs text-slate-500 mt-1">
-              {settings.address} · Navigation physique des rayons & gestion des 3 états (Disponible, Non disponible, Réservé)
+              {settings.address} · Navigation physique des rayons & gestion des 3 états (Disponible, Indisponible, Réservé)
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -115,10 +115,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* KPI 3: Non disponibles (Red) */}
+        {/* KPI 3: Indisponibles (Red) */}
         <div className="bg-white rounded-xl border border-rose-200 p-4 bg-rose-50/20">
           <div className="flex items-center justify-between text-rose-800">
-            <span className="text-xs font-semibold">Non disponibles (Prêtés)</span>
+            <span className="text-xs font-semibold">Indisponibles (Prêtés)</span>
             <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
@@ -189,7 +189,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <span aria-hidden="true">·</span>
                     <span>Date de prêt : <strong className="text-slate-700 font-mono tabular-nums">{loan.loanDate}</strong></span>
                     <span aria-hidden="true">·</span>
-                    <span className="text-rose-700 font-medium">Non disponible</span>
+                    <span className="text-rose-700 font-medium">Indisponible</span>
                   </div>
                 </div>
 

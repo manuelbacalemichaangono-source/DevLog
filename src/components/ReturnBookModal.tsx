@@ -23,6 +23,13 @@ export const ReturnBookModal: React.FC<ReturnBookModalProps> = ({ isOpen, onClos
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setErrorMessage(null);
+      setSuccessMessage(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const currentSection = sections.find((s) => s.id === sectionId) || sections[0];
@@ -276,21 +283,41 @@ export const ReturnBookModal: React.FC<ReturnBookModalProps> = ({ isOpen, onClos
           </div>
 
           {/* Boutons d'action */}
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              {successMessage ? 'Fermer' : 'Annuler'}
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Confirmer le retour</span>
-            </button>
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-2.5">
+            {successMessage ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setTitle('');
+                  setAuthor('');
+                  setCopyNumber('');
+                  setSuccessMessage(null);
+                  setErrorMessage(null);
+                }}
+                className="px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200"
+              >
+                Retourner un autre livre
+              </button>
+            ) : (
+              <span />
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                {successMessage ? 'Fermer' : 'Annuler'}
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Confirmer le retour</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

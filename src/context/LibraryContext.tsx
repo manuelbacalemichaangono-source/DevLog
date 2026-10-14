@@ -45,11 +45,12 @@ interface LibraryContextType {
   updateBook: (id: string, updates: Partial<Book>) => void;
   deleteBook: (id: string) => boolean;
 
-  // Member methods
-  addMember: (member: Omit<Member, 'id' | 'memberNumber' | 'registrationDate'>) => void;
+  // Member (Student) methods
+  addMember: (member: { firstName: string; lastName: string; memberNumber?: string }) => void;
   updateMember: (id: string, updates: Partial<Member>) => void;
   deleteMember: (id: string) => boolean;
   renewMemberCard: (id: string) => void;
+  verifyStudent: (matricule: string, lastName: string) => { student: Member | null; error?: string };
 
   // Loan & Return methods (No due dates, no fines, simple status flow)
   borrowBook: (bookId: string, memberId: string, copyId?: string) => { success: boolean; error?: string };
@@ -106,12 +107,37 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const [books, setBooks] = useState<Book[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}books`);
-    return saved ? JSON.parse(saved) : INITIAL_BOOKS;
+    if (saved) {
+      try {
+        const parsed: Book[] = JSON.parse(saved);
+        return parsed.map((b) => ({
+          ...b,
+          copies: (b.copies || []).map((c) => ({
+            ...c,
+            status: ((c.status as string) === 'Non disponible' ? 'Indisponible' : c.status) as CopyStatus,
+          })),
+        }));
+      } catch {
+        return INITIAL_BOOKS;
+      }
+    }
+    return INITIAL_BOOKS;
   });
 
   const [members, setMembers] = useState<Member[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}members`);
-    return saved ? JSON.parse(saved) : INITIAL_MEMBERS;
+    if (saved) {
+      try {
+        const parsed: Member[] = JSON.parse(saved);
+        return parsed.map((m) => ({
+          ...m,
+          memberNumber: (m.memberNumber || '').replace(/^ADH-/, 'ETU-') || `ETU-2024-001`,
+        }));
+      } catch {
+        return INITIAL_MEMBERS;
+      }
+    }
+    return INITIAL_MEMBERS;
   });
 
   const [loans, setLoans] = useState<Loan[]>(() => {
@@ -258,27 +284,29 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     return true;
   };
 
-  // Member methods
-  const addMember = (memberData: Omit<Member, 'id' | 'memberNumber' | 'registrationDate'>) => {
-    const id = `adh-${Date.now()}`;
+  // Student methods
+  const addMember = (studentData: { firstName: string; lastName: string; memberNumber?: string }) => {
+    const id = `etu-${Date.now()}`;
     const year = new Date().getFullYear();
     const count = members.length + 1;
-    const memberNumber = `ADH-${year}-${String(count).padStart(3, '0')}`;
+    const memberNumber = studentData.memberNumber?.trim().toUpperCase() || `ETU-${year}-${String(count).padStart(3, '0')}`;
 
     const newMember: Member = {
-      ...memberData,
       id,
       memberNumber,
-      registrationDate: new Date().toISOString().split('T')[0],
+      firstName: studentData.firstName.trim(),
+      lastName: studentData.lastName.trim(),
+      status: 'Actif',
+      maxLoans: 5,
     };
     setMembers((prev) => [newMember, ...prev]);
-    logActivity('member_new', `Inscription de l’adhérent(e) ${newMember.firstName} ${newMember.lastName}`);
-    addToast('success', 'Adhérent enregistré', `${newMember.firstName} ${newMember.lastName} est inscrit sous le n° ${memberNumber}.`);
+    logActivity('member_new', `Inscription de l’étudiant(e) ${newMember.firstName} ${newMember.lastName} (${memberNumber})`);
+    addToast('success', 'Étudiant inscrit', `${newMember.firstName} ${newMember.lastName} a été inscrit(e) sous le matricule ${memberNumber}.`);
   };
 
   const updateMember = (id: string, updates: Partial<Member>) => {
     setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
-    addToast('info', 'Profil actualisé', 'Données de l’adhérent modifiées.');
+    addToast('info', 'Fiche actualisée', 'Données de l’étudiant modifiées avec succès.');
   };
 
   const deleteMember = (id: string): boolean => {
@@ -287,12 +315,12 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     const hasActiveLoans = loans.some((l) => l.memberId === id && l.status === 'En cours');
     if (hasActiveLoans) {
-      addToast('error', 'Suppression impossible', `${member.firstName} ${member.lastName} a des livres en prêt.`);
+      addToast('error', 'Suppression impossible', `${member.firstName} ${member.lastName} a des livres en cours d'emprunt.`);
       return false;
     }
 
     setMembers((prev) => prev.filter((m) => m.id !== id));
-    addToast('success', 'Adhérent supprimé', `Dossier de ${member.firstName} ${member.lastName} supprimé.`);
+    addToast('success', 'Étudiant retiré', `Fiche de ${member.firstName} ${member.lastName} supprimée.`);
     return true;
   };
 
@@ -300,23 +328,61 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     setMembers((prev) =>
       prev.map((m) => {
         if (m.id === id) {
-          const nextExpiry = new Date();
-          nextExpiry.setFullYear(nextExpiry.getFullYear() + 1);
           return {
             ...m,
-            expiryDate: nextExpiry.toISOString().split('T')[0],
             status: 'Actif',
           };
         }
         return m;
       })
     );
-    addToast('success', 'Carte renouvelée', 'L’adhésion est prolongée d’un an.');
+    addToast('success', 'Inscription renouvelée', 'L’accès étudiant a été renouvelé.');
+  };
+
+  const verifyStudent = (
+    matricule: string,
+    lastName: string
+  ): { student: Member | null; error?: string } => {
+    const clean = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
+
+    const targetMatricule = clean(matricule);
+    const targetName = clean(lastName);
+
+    if (!targetMatricule || !targetName) {
+      return {
+        student: null,
+        error:
+          'Accès refusé : seuls les étudiants inscrits peuvent emprunter ou réserver un livre. Vous pouvez consulter les livres, mais pas les emprunter.',
+      };
+    }
+
+    const found = members.find((m) => {
+      const mNum = clean(m.memberNumber);
+      const mNom = clean(m.lastName);
+      const mFull = clean(`${m.firstName} ${m.lastName}`);
+      return mNum === targetMatricule && (mNom === targetName || mFull === targetName);
+    });
+
+    if (!found) {
+      return {
+        student: null,
+        error:
+          'Accès refusé : seuls les étudiants inscrits peuvent emprunter ou réserver un livre. Vous pouvez consulter les livres, mais pas les emprunter.',
+      };
+    }
+
+    return { student: found };
   };
 
   // ========================================================
   // LOAN FLOW:
-  // 1. When loaned -> copy passes to "Non disponible"
+  // 1. When loaned -> copy passes to "Indisponible"
   // ========================================================
   const borrowBook = (
     bookId: string,
@@ -329,15 +395,16 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (!book) return { success: false, error: 'Ouvrage introuvable.' };
     if (!member) return { success: false, error: 'Adhérent introuvable.' };
 
-    if (member.status !== 'Actif') {
-      const err = `L’adhésion de ${member.firstName} ${member.lastName} est ${member.status.toLowerCase()}.`;
+    if (member.status && member.status !== 'Actif') {
+      const err = `L’adhésion de ${member.firstName} ${member.lastName} est suspendue ou expirée.`;
       addToast('warning', 'Prêt refusé', err);
       return { success: false, error: err };
     }
 
+    const maxAllowed = member.maxLoans ?? settings.defaultMaxLoans ?? 5;
     const memberActiveLoans = loans.filter((l) => l.memberId === memberId && l.status === 'En cours');
-    if (memberActiveLoans.length >= member.maxLoans) {
-      const err = `Quota atteint : ${memberActiveLoans.length}/${member.maxLoans} livres déjà empruntés.`;
+    if (memberActiveLoans.length >= maxAllowed) {
+      const err = `Quota atteint : ${memberActiveLoans.length}/${maxAllowed} livres déjà empruntés.`;
       addToast('warning', 'Quota dépassé', err);
       return { success: false, error: err };
     }
@@ -349,8 +416,8 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       if (!targetCopy) {
         return { success: false, error: 'Exemplaire introuvable.' };
       }
-      if (targetCopy.status === 'Non disponible') {
-        const err = 'Cet exemplaire est déjà prêté (Non disponible).';
+      if (targetCopy.status === 'Indisponible' || (targetCopy.status as string) === 'Non disponible') {
+        const err = 'Cet exemplaire est déjà prêté (Indisponible).';
         addToast('warning', 'Exemplaire indisponible', err);
         return { success: false, error: err };
       }
@@ -385,13 +452,13 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       bookIsbn: book.isbn,
       memberId: member.id,
       memberName: `${member.firstName} ${member.lastName}`,
-      memberEmail: member.email,
+      memberEmail: member.email || '',
       loanDate: todayStr,
       returnDate: null,
       status: 'En cours',
     };
 
-    // Update copy status to "Non disponible"
+    // Update copy status to "Indisponible"
     setBooks((prev) =>
       prev.map((b) => {
         if (b.id === bookId) {
@@ -399,7 +466,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
             c.id === targetCopy!.id
               ? {
                   ...c,
-                  status: 'Non disponible' as const,
+                  status: 'Indisponible' as const,
                   borrowerName: `${member.firstName} ${member.lastName}`,
                   reservedForName: undefined,
                   reservedForMemberId: undefined,
@@ -432,7 +499,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     addToast(
       'success',
       'Prêt enregistré',
-      `Exemplaire n°${targetCopy.copyNumber} prêté à ${member.firstName} ${member.lastName} (Passé à Non disponible).`
+      `Exemplaire n°${targetCopy.copyNumber} prêté à ${member.firstName} ${member.lastName} (Passé à Indisponible).`
     );
 
     return { success: true };
@@ -683,6 +750,14 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       };
     }
 
+    // Vérifie que l'exemplaire indiqué est bien « Indisponible » (emprunté)
+    if (targetCopy.status !== 'Indisponible' && (targetCopy.status as string) !== 'Non disponible') {
+      return {
+        success: false,
+        message: 'Aucun exemplaire emprunté ne correspond à ces informations.',
+      };
+    }
+
     // Vérifie s'il était réservé pour une autre personne
     const pendingRes = reservations.find(
       (r) =>
@@ -703,6 +778,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
                 ...c,
                 status: newStatus,
                 borrowerName: undefined,
+                exactLocation: `Exemplaire ${targetCopy.copyNumber} de ${bookOnShelf.title}, ${sec.code}, ${thm.name}, ${shf.name}`,
                 reservedForName: pendingRes ? pendingRes.memberName : undefined,
                 reservedForMemberId: pendingRes ? pendingRes.memberId : undefined,
               };
@@ -942,7 +1018,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     const allCopies = books.flatMap((b) => b.copies || []);
     const totalBooks = allCopies.length;
     const availableCopies = allCopies.filter((c) => c.status === 'Disponible').length;
-    const borrowedCopies = allCopies.filter((c) => c.status === 'Non disponible').length;
+    const borrowedCopies = allCopies.filter((c) => c.status === 'Indisponible' || (c.status as string) === 'Non disponible').length;
     const reservedCopies = allCopies.filter((c) => c.status === 'Réservé').length;
 
     const activeLoans = loans.filter((l) => l.status === 'En cours');
@@ -984,6 +1060,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
         updateMember,
         deleteMember,
         renewMemberCard,
+        verifyStudent,
         borrowBook,
         returnBook,
         returnCopy,

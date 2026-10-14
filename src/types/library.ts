@@ -12,7 +12,7 @@ export type BookGenre =
 
 export type BookCondition = 'Parfait' | 'Bon' | 'Légèrement abîmé' | 'Endommagé';
 
-export type CopyStatus = 'Disponible' | 'Indisponible' | 'Non disponible' | 'Réservé';
+export type CopyStatus = 'Disponible' | 'Indisponible' | 'Réservé';
 
 export interface BookCopy {
   id: string;
@@ -84,16 +84,16 @@ export type MemberStatus = 'Actif' | 'Suspendu' | 'Expiré';
 
 export interface Member {
   id: string;
-  memberNumber: string; // e.g. "ADH-2024-042"
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  category: MemberCategory;
-  registrationDate: string;
-  expiryDate: string;
-  status: MemberStatus;
-  maxLoans: number;
+  memberNumber: string; // Numéro de matricule unique (e.g. "ETU-2024-001")
+  firstName: string; // Prénom de l'étudiant
+  lastName: string; // Nom de l'étudiant
+  email?: string;
+  phone?: string;
+  category?: MemberCategory;
+  registrationDate?: string;
+  expiryDate?: string;
+  status?: MemberStatus;
+  maxLoans?: number;
   notes?: string;
 }
 
