@@ -2,38 +2,24 @@ import React, { useState } from 'react';
 import { LibraryProvider, useLibrary } from './context/LibraryContext';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
-import { DashboardView } from './components/DashboardView';
-import { PhysicalLibraryBrowser, NavigationLevel } from './components/PhysicalLibraryBrowser';
-import { BookPlus, RotateCcw } from 'lucide-react';
-import { LoansView } from './components/LoansView';
-import { MembersView } from './components/MembersView';
-import { ReservationsView } from './components/ReservationsView';
-import { SettingsView } from './components/SettingsView';
+import { StudentSection } from './components/StudentSection';
+import { BooksSection } from './components/BooksSection';
+import { LoansSection } from './components/LoansSection';
 import { ToastContainer } from './components/ToastContainer';
 import { NewLoanModal } from './components/NewLoanModal';
 import { ReturnModal } from './components/ReturnModal';
-import { ReturnBookModal } from './components/ReturnBookModal';
-import { ReserveCopyModal } from './components/ReserveCopyModal';
 import { BookModal } from './components/BookModal';
 import { MemberModal } from './components/MemberModal';
-import { BookDetailModal } from './components/BookDetailModal';
-import { MemberDetailModal } from './components/MemberDetailModal';
 import { StudentIdentificationModal } from './components/StudentIdentificationModal';
+import { QRScannerModal } from './components/QRScannerModal';
 import { Book, BookCopy, Member } from './types/library';
 
 function LibraryApp() {
-  const { borrowBook, reserveBook, addToast } = useLibrary();
+  const { borrowBook, addToast } = useLibrary();
 
-  // Par défaut sur 'books' (Plan & Consultation des Rayons)
-  const [activeTab, setActiveTab] = useState<ActiveTab>('books');
-  const [browserLevel, setBrowserLevel] = useState<NavigationLevel>(1);
+  // Navigation tab state: strictly 'student' | 'books' | 'loans'
+  const [activeTab, setActiveTab] = useState<ActiveTab>('student');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Student Identity Verification state (pour emprunter ou réserver)
-  const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
-  const [identityActionType, setIdentityActionType] = useState<'borrow' | 'reserve'>('borrow');
-  const [identityTargetBook, setIdentityTargetBook] = useState<Book | null>(null);
-  const [identityTargetCopy, setIdentityTargetCopy] = useState<BookCopy | null>(null);
 
   // Modals state
   const [isNewLoanOpen, setIsNewLoanOpen] = useState(false);
@@ -43,85 +29,62 @@ function LibraryApp() {
 
   const [isBookModalOpen, setIsBookModalOpen] = useState(false);
   const [bookToEdit, setBookToEdit] = useState<Book | null>(null);
-  const [initialBookLocation, setInitialBookLocation] = useState<{
-    sectionId?: string;
-    themeId?: string;
-    shelfId?: string;
-  } | undefined>(undefined);
-
-  const [isReturnBookOpen, setIsReturnBookOpen] = useState(false);
-
-  const [isReserveCopyOpen, setIsReserveCopyOpen] = useState(false);
-  const [reserveTargetBook, setReserveTargetBook] = useState<Book | null>(null);
-  const [reserveTargetCopy, setReserveTargetCopy] = useState<BookCopy | null>(null);
 
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
-  const [memberToEdit, setMemberToEdit] = useState<Member | null>(null);
-
-  const [selectedBookForDetail, setSelectedBookForDetail] = useState<Book | null>(null);
-  const [selectedMemberForDetail, setSelectedMemberForDetail] = useState<Member | null>(null);
-
   const [returnLoanId, setReturnLoanId] = useState<string | null>(null);
 
-  // Handlers pour le contrôle d'accès :
-  // Quand quelqu'un clique sur « Emprunter » ou « Réserver », ouvre d'abord la vérification d'identité
+  // Student Identity check for loan action
+  const [isIdentityModalOpen, setIsIdentityModalOpen] = useState(false);
+  const [identityTargetBook, setIdentityTargetBook] = useState<Book | null>(null);
+  const [identityTargetCopy, setIdentityTargetCopy] = useState<BookCopy | null>(null);
+
+  // Global QR Scanner
+  const [isGlobalQRScannerOpen, setIsGlobalQRScannerOpen] = useState(false);
+
+  const handleGlobalScan = (result: { book: Book; copy: BookCopy; loan?: any }) => {
+    if (result.copy.status === 'Emprunté' || result.loan) {
+      if (result.loan) {
+        setReturnLoanId(result.loan.id);
+      } else {
+        addToast('error', 'Exemplaire emprunté', `L'exemplaire ${result.copy.copyIdentifier} est actuellement emprunté.`);
+      }
+    } else {
+      handleRequestBorrow(result.book, result.copy);
+    }
+  };
+
   const handleRequestBorrow = (book?: Book | null, copy?: BookCopy | null) => {
-    setIdentityActionType('borrow');
     setIdentityTargetBook(book || null);
     setIdentityTargetCopy(copy || null);
     setIsIdentityModalOpen(true);
   };
 
-  const handleRequestReserve = (book: Book, copy: BookCopy) => {
-    setIdentityActionType('reserve');
-    setIdentityTargetBook(book);
-    setIdentityTargetCopy(copy);
-    setIsIdentityModalOpen(true);
-  };
-
   const handleStudentIdentified = (student: Member) => {
-    if (identityActionType === 'borrow') {
-      if (identityTargetBook && identityTargetCopy) {
-        // Emprunt direct de l'exemplaire ciblé pour cet étudiant identifié
-        const res = borrowBook(identityTargetBook.id, student.id, identityTargetCopy.id);
+    if (identityTargetBook && identityTargetCopy) {
+      const res = borrowBook(identityTargetBook.id, student.id, identityTargetCopy.id);
+      if (res.success) {
+        addToast(
+          'success',
+          'Emprunt confirmé',
+          `Exemplaire ${identityTargetCopy.copyIdentifier} de "${identityTargetBook.title}" prêté à ${student.firstName} ${student.lastName} (Matricule : ${student.memberNumber}).`
+        );
+      }
+    } else if (identityTargetBook) {
+      const availableCopy = identityTargetBook.copies?.find((c) => c.status === 'Disponible');
+      if (availableCopy) {
+        const res = borrowBook(identityTargetBook.id, student.id, availableCopy.id);
         if (res.success) {
           addToast(
             'success',
             'Emprunt confirmé',
-            `Exemplaire ${identityTargetCopy.copyNumber} de "${identityTargetBook.title}" emprunté par ${student.firstName} ${student.lastName} (Matricule : ${student.memberNumber}).`
+            `Exemplaire ${availableCopy.copyIdentifier} de "${identityTargetBook.title}" prêté à ${student.firstName} ${student.lastName} (Matricule : ${student.memberNumber}).`
           );
-        }
-      } else if (identityTargetBook) {
-        // Trouver le premier exemplaire disponible
-        const availableCopy = identityTargetBook.copies?.find((c) => c.status === 'Disponible');
-        if (availableCopy) {
-          const res = borrowBook(identityTargetBook.id, student.id, availableCopy.id);
-          if (res.success) {
-            addToast(
-              'success',
-              'Emprunt confirmé',
-              `Exemplaire ${availableCopy.copyNumber} de "${identityTargetBook.title}" emprunté par ${student.firstName} ${student.lastName} (Matricule : ${student.memberNumber}).`
-            );
-          }
-        } else {
-          handleOpenNewLoan(identityTargetBook, null, student);
         }
       } else {
-        // Emprunt libre (via guichet ou raccourci) avec l'étudiant identifié
-        handleOpenNewLoan(null, null, student);
+        handleOpenNewLoan(identityTargetBook, null, student);
       }
-    } else if (identityActionType === 'reserve') {
-      if (identityTargetBook && identityTargetCopy) {
-        // Réservation directe de l'exemplaire pour cet étudiant identifié
-        const res = reserveBook(identityTargetBook.id, student.id, identityTargetCopy.id);
-        if (res.success) {
-          addToast(
-            'success',
-            'Réservation confirmée',
-            `Exemplaire ${identityTargetCopy.copyNumber} de "${identityTargetBook.title}" réservé pour ${student.firstName} ${student.lastName} (Matricule : ${student.memberNumber}).`
-          );
-        }
-      }
+    } else {
+      handleOpenNewLoan(null, null, student);
     }
   };
 
@@ -136,25 +99,12 @@ function LibraryApp() {
     setIsNewLoanOpen(true);
   };
 
-  const handleOpenNewBook = (location?: { sectionId?: string; themeId?: string; shelfId?: string }) => {
+  const handleOpenNewBook = () => {
     setBookToEdit(null);
-    setInitialBookLocation(location);
-    setIsBookModalOpen(true);
-  };
-
-  const handleEditBook = (book: Book) => {
-    setBookToEdit(book);
-    setInitialBookLocation(undefined);
     setIsBookModalOpen(true);
   };
 
   const handleOpenNewMember = () => {
-    setMemberToEdit(null);
-    setIsMemberModalOpen(true);
-  };
-
-  const handleEditMember = (member: Member) => {
-    setMemberToEdit(member);
     setIsMemberModalOpen(true);
   };
 
@@ -163,7 +113,7 @@ function LibraryApp() {
       {/* Toast Notifications */}
       <ToastContainer />
 
-      {/* Sidebar */}
+      {/* Sidebar: 3 tabs only */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -172,107 +122,55 @@ function LibraryApp() {
         onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
 
-      {/* Main Workspace Canvas */}
+      {/* Main Workspace */}
       <div className="flex-1 flex flex-col min-w-0 lg:ml-64">
-        {/* Top Header - En-tête avec titre complet non tronqué */}
+        {/* Top Header */}
         <TopBar
           activeTab={activeTab}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
           onOpenNewLoan={() => handleRequestBorrow()}
-          onOpenNewMember={handleOpenNewMember}
+          onOpenQRScanner={() => setIsGlobalQRScannerOpen(true)}
         />
 
-        {/* Barre d'action juste sous l'en-tête (seulement écran principal des rayons) */}
-        {activeTab === 'books' && browserLevel === 1 && (
-          <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 shadow-xs">
-            <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full">
-              <button
-                type="button"
-                onClick={() => handleOpenNewBook()}
-                className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm text-white bg-slate-900 hover:bg-slate-800 transition-all shadow-sm active:scale-[0.99] border border-slate-800 cursor-pointer"
-              >
-                <BookPlus className="w-4 h-4 shrink-0 text-indigo-400" />
-                <span>Ranger un livre</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsReturnBookOpen(true)}
-                className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-sm active:scale-[0.99] border border-indigo-700 cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4 shrink-0 text-white" />
-                <span>Retourner un livre</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Viewport Content */}
+        {/* Content View: 3 parts */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          {/* Books Consultation: 5-Level Physical Navigation (Sections -> Themes -> Shelves -> Titles -> Copies) */}
+          {/* 1. ÉTUDIANT */}
+          {activeTab === 'student' && (
+            <StudentSection
+              onOpenNewMember={handleOpenNewMember}
+              onOpenReturnModal={(loanId) => setReturnLoanId(loanId)}
+            />
+          )}
+
+          {/* 2. OUVRAGE */}
           {activeTab === 'books' && (
-            <PhysicalLibraryBrowser
-              level={browserLevel}
-              onLevelChange={setBrowserLevel}
-              onOpenNewBook={() => handleOpenNewBook()}
-              onOpenReturnBook={() => setIsReturnBookOpen(true)}
-              onQuickLoanBookCopy={(book, copy) => handleRequestBorrow(book, copy)}
-              onSelectBookForDetail={(b) => setSelectedBookForDetail(b)}
-              onOpenReserveCopyModal={(b, copy) => handleRequestReserve(b, copy)}
+            <BooksSection
+              onOpenNewBook={handleOpenNewBook}
+              onQuickLoan={(book, copy) => handleRequestBorrow(book, copy)}
+              onQuickReturn={(loanId) => setReturnLoanId(loanId)}
             />
           )}
 
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              onNavigate={(tab) => setActiveTab(tab)}
-              onOpenNewLoan={() => handleRequestBorrow()}
-              onOpenNewBook={() => handleOpenNewBook()}
-              onOpenNewMember={handleOpenNewMember}
-              onOpenReturnModal={(id) => setReturnLoanId(id)}
-            />
-          )}
-
+          {/* 3. EMPRUNT */}
           {activeTab === 'loans' && (
-            <LoansView
+            <LoansSection
               onOpenNewLoan={() => handleRequestBorrow()}
-              onOpenReturnModal={(id) => setReturnLoanId(id)}
+              onOpenReturnModal={(loanId) => setReturnLoanId(loanId)}
             />
           )}
-
-          {activeTab === 'members' && (
-            <MembersView
-              onOpenNewMember={handleOpenNewMember}
-              onEditMember={handleEditMember}
-              onSelectMember={(m) => setSelectedMemberForDetail(m)}
-              onQuickLoanForMember={(m) => handleOpenNewLoan(null, null, m)}
-            />
-          )}
-
-          {activeTab === 'reservations' && (
-            <ReservationsView
-              onOpenNewLoan={() => handleRequestBorrow()}
-            />
-          )}
-
-          {activeTab === 'settings' && <SettingsView />}
         </main>
       </div>
 
-      {/* Modale de vérification d'identité (Contrôle d'accès étudiant obligatoire pour emprunter et réserver) */}
+      {/* Student Identity Verification Modal */}
       <StudentIdentificationModal
         isOpen={isIdentityModalOpen}
-        onClose={() => {
-          setIsIdentityModalOpen(false);
-          setIdentityTargetBook(null);
-          setIdentityTargetCopy(null);
-        }}
-        actionType={identityActionType}
+        onClose={() => setIsIdentityModalOpen(false)}
         book={identityTargetBook}
         copy={identityTargetCopy}
         onIdentified={handleStudentIdentified}
       />
 
-      {/* Modals */}
+      {/* New Loan Modal */}
       <NewLoanModal
         isOpen={isNewLoanOpen}
         onClose={() => {
@@ -284,77 +182,37 @@ function LibraryApp() {
         preselectedBook={preselectedBook}
         preselectedCopy={preselectedCopy}
         preselectedMember={preselectedMember}
+        onSwitchToReturn={(loanId) => setReturnLoanId(loanId)}
       />
 
+      {/* Return Modal */}
       <ReturnModal
         loanId={returnLoanId}
         onClose={() => setReturnLoanId(null)}
       />
 
+      {/* Book Add/Edit Modal */}
       <BookModal
         isOpen={isBookModalOpen}
         onClose={() => {
           setIsBookModalOpen(false);
           setBookToEdit(null);
-          setInitialBookLocation(undefined);
         }}
         bookToEdit={bookToEdit}
-        initialLocation={initialBookLocation}
       />
 
+      {/* Member Add Modal */}
       <MemberModal
         isOpen={isMemberModalOpen}
-        onClose={() => {
-          setIsMemberModalOpen(false);
-          setMemberToEdit(null);
-        }}
-        memberToEdit={memberToEdit}
+        onClose={() => setIsMemberModalOpen(false)}
       />
 
-      <BookDetailModal
-        book={selectedBookForDetail}
-        onClose={() => setSelectedBookForDetail(null)}
-        onEdit={(b) => {
-          setSelectedBookForDetail(null);
-          handleEditBook(b);
-        }}
-        onQuickLoan={(b, copy) => {
-          setSelectedBookForDetail(null);
-          handleRequestBorrow(b, copy);
-        }}
-      />
-
-      <MemberDetailModal
-        member={selectedMemberForDetail}
-        onClose={() => setSelectedMemberForDetail(null)}
-        onEdit={(m) => {
-          setSelectedMemberForDetail(null);
-          handleEditMember(m);
-        }}
-        onQuickLoan={(m) => {
-          setSelectedMemberForDetail(null);
-          handleOpenNewLoan(null, null, m);
-        }}
-        onOpenReturnModal={(id) => {
-          setSelectedMemberForDetail(null);
-          setReturnLoanId(id);
-        }}
-      />
-
-      <ReturnBookModal
-        isOpen={isReturnBookOpen}
-        onClose={() => setIsReturnBookOpen(false)}
-      />
-
-      <ReserveCopyModal
-        isOpen={isReserveCopyOpen}
-        onClose={() => {
-          setIsReserveCopyOpen(false);
-          setReserveTargetBook(null);
-          setReserveTargetCopy(null);
-        }}
-        book={reserveTargetBook}
-        copy={reserveTargetCopy}
+      {/* Global QR Scanner Modal */}
+      <QRScannerModal
+        isOpen={isGlobalQRScannerOpen}
+        onClose={() => setIsGlobalQRScannerOpen(false)}
+        mode="any"
+        onScanSuccess={handleGlobalScan}
       />
     </div>
   );

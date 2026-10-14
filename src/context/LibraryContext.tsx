@@ -3,13 +3,13 @@ import {
   Book,
   Member,
   Loan,
-  Reservation,
   LibrarySettings,
   ActivityLog,
   BookCondition,
   LibrarySection,
   BookCopy,
   CopyStatus,
+  LoanStatus,
 } from '../types/library';
 import {
   INITIAL_SETTINGS,
@@ -17,7 +17,6 @@ import {
   INITIAL_BOOKS,
   INITIAL_MEMBERS,
   INITIAL_LOANS,
-  INITIAL_RESERVATIONS,
   INITIAL_LOGS,
 } from '../data/seedData';
 
@@ -28,34 +27,51 @@ export interface ToastMessage {
   message: string;
 }
 
+export interface OverdueInfo {
+  isOverdue: boolean;
+  daysOverdue: number;
+}
+
 interface LibraryContextType {
   sections: LibrarySection[];
   books: Book[];
   members: Member[];
   loans: Loan[];
-  reservations: Reservation[];
   settings: LibrarySettings;
   activityLogs: ActivityLog[];
   toasts: ToastMessage[];
   addToast: (type: ToastMessage['type'], title: string, message: string) => void;
   removeToast: (id: string) => void;
 
+  // Authentication & Security
+  currentUser: Member | null;
+  login: (identifier: string, password?: string) => { success: boolean; error?: string };
+  logout: () => void;
+  registerStudent: (data: {
+    firstName: string;
+    lastName: string;
+    memberNumber: string;
+    email: string;
+    password?: string;
+    filiere?: string;
+    phone?: string;
+  }) => { success: boolean; error?: string; student?: Member };
+
   // Book methods
-  addBook: (book: Omit<Book, 'id' | 'availableCopies' | 'addedDate' | 'copies'>) => void;
+  addBook: (book: Omit<Book, 'id' | 'availableCopies' | 'borrowedCopies' | 'addedDate' | 'copies'>) => void;
   updateBook: (id: string, updates: Partial<Book>) => void;
   deleteBook: (id: string) => boolean;
 
-  // Member (Student) methods
-  addMember: (member: { firstName: string; lastName: string; memberNumber?: string }) => void;
+  // Student methods
+  addMember: (member: { firstName: string; lastName: string; memberNumber?: string; email?: string; phone?: string; filiere?: string }) => void;
   updateMember: (id: string, updates: Partial<Member>) => void;
   deleteMember: (id: string) => boolean;
-  renewMemberCard: (id: string) => void;
   verifyStudent: (matricule: string, lastName: string) => { student: Member | null; error?: string };
 
-  // Loan & Return methods (No due dates, no fines, simple status flow)
-  borrowBook: (bookId: string, memberId: string, copyId?: string) => { success: boolean; error?: string };
+  // Loan & Return methods
+  borrowBook: (bookId: string, memberId: string, copyId?: string, dueDate?: string) => { success: boolean; error?: string };
   returnBook: (loanId: string, condition?: BookCondition) => void;
-  returnCopy: (bookId: string, copyId: string) => { success: boolean; message: string; isReserved?: boolean };
+  returnCopy: (bookId: string, copyId: string) => { success: boolean; message: string };
   manualReturnBook: (params: {
     sectionId: string;
     themeId: string;
@@ -63,12 +79,11 @@ interface LibraryContextType {
     title: string;
     author: string;
     copyNumber: number;
-  }) => { success: boolean; message: string; isReserved?: boolean };
+  }) => { success: boolean; message: string };
 
-  // Reservation methods
-  reserveBook: (bookId: string, memberId: string, copyId?: string) => { success: boolean; error?: string };
-  cancelReservation: (reservationId: string) => void;
-  claimReservation: (reservationId: string) => { success: boolean; error?: string };
+  // Helpers for overdue and dates
+  getLoanOverdueInfo: (loan: Loan) => OverdueInfo;
+  getCopyLiveStatus: (copy: BookCopy) => { status: 'Disponible' | 'Emprunté' | 'En retard'; loan?: Loan; daysOverdue?: number };
 
   // Settings & System
   updateSettings: (newSettings: LibrarySettings) => void;
@@ -82,17 +97,43 @@ interface LibraryContextType {
     totalTitles: number;
     availableCopies: number;
     borrowedCopies: number;
-    reservedCopies: number;
     activeLoansCount: number;
-    activeReservationsCount: number;
+    overdueLoansCount: number;
     totalMembers: number;
     activeMembersCount: number;
   };
 }
 
-const STORAGE_KEY_PREFIX = 'bibliotech_v4_';
+const STORAGE_KEY_PREFIX = 'bibliotech_v5_';
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
+
+// Helper to calculate days between dates
+export function calculateDaysBetween(fromIsoDate: string, toIsoDate: string): number {
+  const d1 = new Date(fromIsoDate + 'T00:00:00');
+  const d2 = new Date(toIsoDate + 'T00:00:00');
+  const diffTime = d2.getTime() - d1.getTime();
+  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
+// Get today formatted as YYYY-MM-DD
+export function getTodayDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Add days to date
+export function addDaysToDate(baseDateIso: string, days: number): string {
+  const date = new Date(baseDateIso + 'T00:00:00');
+  date.setDate(date.getDate() + days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [sections, setSections] = useState<LibrarySection[]>(() => {
@@ -110,13 +151,21 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (saved) {
       try {
         const parsed: Book[] = JSON.parse(saved);
-        return parsed.map((b) => ({
-          ...b,
-          copies: (b.copies || []).map((c) => ({
+        return parsed.map((b) => {
+          const copies = (b.copies || []).map((c, idx) => ({
             ...c,
-            status: ((c.status as string) === 'Non disponible' ? 'Indisponible' : c.status) as CopyStatus,
-          })),
-        }));
+            copyIdentifier: c.copyIdentifier || `EX-${b.id.toUpperCase()}-${String(c.copyNumber || idx + 1).padStart(2, '0')}`,
+            status: ((c.status as string) === 'Réservé' ? 'Disponible' : ((c.status as string) === 'Indisponible' ? 'Emprunté' : c.status)) as CopyStatus,
+          }));
+          const available = copies.filter((c) => c.status === 'Disponible').length;
+          const borrowed = copies.filter((c) => c.status === 'Emprunté').length;
+          return {
+            ...b,
+            copies,
+            availableCopies: available,
+            borrowedCopies: borrowed,
+          };
+        });
       } catch {
         return INITIAL_BOOKS;
       }
@@ -128,11 +177,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}members`);
     if (saved) {
       try {
-        const parsed: Member[] = JSON.parse(saved);
-        return parsed.map((m) => ({
-          ...m,
-          memberNumber: (m.memberNumber || '').replace(/^ADH-/, 'ETU-') || `ETU-2024-001`,
-        }));
+        return JSON.parse(saved);
       } catch {
         return INITIAL_MEMBERS;
       }
@@ -142,18 +187,53 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const [loans, setLoans] = useState<Loan[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}loans`);
-    return saved ? JSON.parse(saved) : INITIAL_LOANS;
-  });
-
-  const [reservations, setReservations] = useState<Reservation[]>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}reservations`);
-    return saved ? JSON.parse(saved) : INITIAL_RESERVATIONS;
+    if (saved) {
+      try {
+        const parsed: Loan[] = JSON.parse(saved);
+        return parsed.map((l) => {
+          const dueDate = l.dueDate || addDaysToDate(l.loanDate, 14);
+          const isOverdue = l.status !== 'Terminé' && (l.returnDate === null || l.returnDate === undefined) && dueDate < getTodayDateString();
+          return {
+            ...l,
+            dueDate,
+            status: l.status === 'Terminé' || (l.status as string) === 'Rendu'
+              ? 'Terminé'
+              : (isOverdue ? 'En retard' : 'En cours') as LoanStatus,
+            copyIdentifier: l.copyIdentifier || `EX-${l.bookId.toUpperCase()}-${String(l.copyNumber).padStart(2, '0')}`,
+          };
+        });
+      } catch {
+        return INITIAL_LOANS;
+      }
+    }
+    return INITIAL_LOANS;
   });
 
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}logs`);
     return saved ? JSON.parse(saved) : INITIAL_LOGS;
   });
+
+  // Authenticated Student User Session
+  const [currentUser, setCurrentUser] = useState<Member | null>(() => {
+    const savedUser = localStorage.getItem(`${STORAGE_KEY_PREFIX}current_user`);
+    if (savedUser) {
+      try {
+        return JSON.parse(savedUser);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}current_user`);
+    }
+  }, [currentUser]);
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
@@ -162,7 +242,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     setToasts((prev) => [...prev, { id, type, title, message }]);
     setTimeout(() => {
       setToasts((current) => current.filter((t) => t.id !== id));
-    }, 4000);
+    }, 4500);
   };
 
   const removeToast = (id: string) => {
@@ -177,6 +257,37 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       description,
     };
     setActivityLogs((prev) => [newLog, ...prev.slice(0, 49)]);
+  };
+
+  // Helper for overdue checks
+  const getLoanOverdueInfo = (loan: Loan): OverdueInfo => {
+    if (loan.status === 'Terminé' || loan.returnDate) {
+      return { isOverdue: false, daysOverdue: 0 };
+    }
+    const today = getTodayDateString();
+    if (today > loan.dueDate) {
+      const days = calculateDaysBetween(loan.dueDate, today);
+      return { isOverdue: true, daysOverdue: Math.max(1, days) };
+    }
+    return { isOverdue: false, daysOverdue: 0 };
+  };
+
+  const getCopyLiveStatus = (copy: BookCopy): { status: 'Disponible' | 'Emprunté' | 'En retard'; loan?: Loan; daysOverdue?: number } => {
+    if (copy.status === 'Disponible') {
+      return { status: 'Disponible' };
+    }
+    // Find active loan
+    const activeLoan = loans.find(
+      (l) => (l.copyId === copy.id || (l.bookId === copy.bookId && l.copyNumber === copy.copyNumber)) && l.status !== 'Terminé'
+    );
+    if (!activeLoan) {
+      return { status: 'Emprunté' };
+    }
+    const overdue = getLoanOverdueInfo(activeLoan);
+    if (overdue.isOverdue) {
+      return { status: 'En retard', loan: activeLoan, daysOverdue: overdue.daysOverdue };
+    }
+    return { status: 'Emprunté', loan: activeLoan };
   };
 
   // Persist to localStorage
@@ -201,26 +312,25 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [loans]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}reservations`, JSON.stringify(reservations));
-  }, [reservations]);
-
-  useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}logs`, JSON.stringify(activityLogs));
   }, [activityLogs]);
 
   // Book methods
-  const addBook = (bookData: Omit<Book, 'id' | 'availableCopies' | 'addedDate' | 'copies'>) => {
+  const addBook = (bookData: Omit<Book, 'id' | 'availableCopies' | 'borrowedCopies' | 'addedDate' | 'copies'>) => {
     const id = `liv-${Date.now()}`;
+    const titleSlug = bookData.title.slice(0, 6).toUpperCase().replace(/[^A-Z0-9]/g, '');
     const copies: BookCopy[] = [];
     for (let i = 1; i <= bookData.totalCopies; i++) {
+      const copyIdentifier = `EX-${titleSlug || 'BK'}-${String(i).padStart(2, '0')}`;
       copies.push({
         id: `${id}-ex-${i}`,
         copyNumber: i,
+        copyIdentifier,
         bookId: id,
         barcode: `EX-${id.toUpperCase()}-${String(i).padStart(2, '0')}`,
         status: 'Disponible',
         condition: 'Parfait',
-        exactLocation: `Exemplaire ${i} de ${bookData.title}, ${bookData.sectionName}, ${bookData.themeName}, ${bookData.shelfName}`,
+        exactLocation: `${bookData.sectionName} > ${bookData.themeName} > ${bookData.shelfName}`,
       });
     }
 
@@ -228,12 +338,14 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       ...bookData,
       id,
       availableCopies: bookData.totalCopies,
-      addedDate: new Date().toISOString().split('T')[0],
+      borrowedCopies: 0,
+      addedDate: getTodayDateString(),
       copies,
     };
+
     setBooks((prev) => [newBook, ...prev]);
-    logActivity('book_new', `Nouvel ouvrage rangé dans ${newBook.shelfName} : "${newBook.title}"`);
-    addToast('success', 'Ouvrage placé en rayon', `"${newBook.title}" est maintenant disponible.`);
+    logActivity('book_new', `Nouvel ouvrage enregistré : "${newBook.title}" (${newBook.totalCopies} exemplaires)`);
+    addToast('success', 'Ouvrage enregistré', `"${newBook.title}" a été ajouté avec ${newBook.totalCopies} exemplaire(s).`);
   };
 
   const updateBook = (id: string, updates: Partial<Book>) => {
@@ -245,22 +357,26 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
             const currentCopies = book.copies || [];
             if (updates.totalCopies > currentCopies.length) {
               const newCopies = [...currentCopies];
+              const titleSlug = (updated.title || 'BK').slice(0, 6).toUpperCase().replace(/[^A-Z0-9]/g, '');
               for (let i = currentCopies.length + 1; i <= updates.totalCopies; i++) {
                 newCopies.push({
                   id: `${id}-ex-${i}`,
                   copyNumber: i,
+                  copyIdentifier: `EX-${titleSlug}-${String(i).padStart(2, '0')}`,
                   bookId: id,
                   barcode: `EX-${id.toUpperCase()}-${String(i).padStart(2, '0')}`,
                   status: 'Disponible',
                   condition: 'Bon',
-                  exactLocation: `Exemplaire ${i} de ${updated.title}, ${updated.sectionName}, ${updated.themeName}, ${updated.shelfName}`,
+                  exactLocation: `${updated.sectionName} > ${updated.themeName} > ${updated.shelfName}`,
                 });
               }
               updated.copies = newCopies;
             }
-            const free = (updated.copies || []).filter((c) => c.status === 'Disponible').length;
-            updated.availableCopies = free;
           }
+          const available = (updated.copies || []).filter((c) => c.status === 'Disponible').length;
+          const borrowed = (updated.copies || []).filter((c) => c.status === 'Emprunté').length;
+          updated.availableCopies = available;
+          updated.borrowedCopies = borrowed;
           return updated;
         }
         return book;
@@ -273,19 +389,27 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     const book = books.find((b) => b.id === id);
     if (!book) return false;
 
-    const hasActiveLoan = loans.some((l) => l.bookId === id && l.status === 'En cours');
+    const hasActiveLoan = loans.some((l) => l.bookId === id && l.status !== 'Terminé');
     if (hasActiveLoan) {
-      addToast('error', 'Suppression impossible', `Des exemplaires de "${book.title}" sont actuellement prêtés.`);
+      addToast('error', 'Suppression impossible', `Des exemplaires de "${book.title}" sont actuellement empruntés.`);
       return false;
     }
 
     setBooks((prev) => prev.filter((b) => b.id !== id));
-    addToast('success', 'Livre retiré', `"${book.title}" a été retiré.`);
+    logActivity('book_new', `Ouvrage retiré du fonds : "${book.title}"`);
+    addToast('success', 'Ouvrage supprimé', `"${book.title}" a été retiré.`);
     return true;
   };
 
   // Student methods
-  const addMember = (studentData: { firstName: string; lastName: string; memberNumber?: string }) => {
+  const addMember = (studentData: {
+    firstName: string;
+    lastName: string;
+    memberNumber?: string;
+    email?: string;
+    phone?: string;
+    filiere?: string;
+  }) => {
     const id = `etu-${Date.now()}`;
     const year = new Date().getFullYear();
     const count = members.length + 1;
@@ -296,47 +420,38 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       memberNumber,
       firstName: studentData.firstName.trim(),
       lastName: studentData.lastName.trim(),
+      email: studentData.email?.trim() || `${studentData.firstName.toLowerCase()}.${studentData.lastName.toLowerCase()}@etudiant.univ.fr`,
+      phone: studentData.phone?.trim() || '',
+      filiere: studentData.filiere?.trim() || 'Licence Universitaire',
+      category: 'Étudiant',
+      registrationDate: getTodayDateString(),
       status: 'Actif',
-      maxLoans: 5,
+      maxLoans: settings.defaultMaxLoans || 5,
     };
+
     setMembers((prev) => [newMember, ...prev]);
     logActivity('member_new', `Inscription de l’étudiant(e) ${newMember.firstName} ${newMember.lastName} (${memberNumber})`);
-    addToast('success', 'Étudiant inscrit', `${newMember.firstName} ${newMember.lastName} a été inscrit(e) sous le matricule ${memberNumber}.`);
+    addToast('success', 'Étudiant inscrit', `${newMember.firstName} ${newMember.lastName} inscrit(e) (Matricule : ${memberNumber}).`);
   };
 
   const updateMember = (id: string, updates: Partial<Member>) => {
     setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
-    addToast('info', 'Fiche actualisée', 'Données de l’étudiant modifiées avec succès.');
+    addToast('info', 'Fiche actualisée', 'Informations de l’étudiant modifiées.');
   };
 
   const deleteMember = (id: string): boolean => {
     const member = members.find((m) => m.id === id);
     if (!member) return false;
 
-    const hasActiveLoans = loans.some((l) => l.memberId === id && l.status === 'En cours');
+    const hasActiveLoans = loans.some((l) => l.memberId === id && l.status !== 'Terminé');
     if (hasActiveLoans) {
-      addToast('error', 'Suppression impossible', `${member.firstName} ${member.lastName} a des livres en cours d'emprunt.`);
+      addToast('error', 'Suppression impossible', `${member.firstName} ${member.lastName} a des exemplaires en cours d’emprunt.`);
       return false;
     }
 
     setMembers((prev) => prev.filter((m) => m.id !== id));
-    addToast('success', 'Étudiant retiré', `Fiche de ${member.firstName} ${member.lastName} supprimée.`);
+    addToast('success', 'Étudiant supprimé', `Dossier de ${member.firstName} ${member.lastName} retiré.`);
     return true;
-  };
-
-  const renewMemberCard = (id: string) => {
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id === id) {
-          return {
-            ...m,
-            status: 'Actif',
-          };
-        }
-        return m;
-      })
-    );
-    addToast('success', 'Inscription renouvelée', 'L’accès étudiant a été renouvelé.');
   };
 
   const verifyStudent = (
@@ -358,7 +473,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       return {
         student: null,
         error:
-          'Accès refusé : seuls les étudiants inscrits peuvent emprunter ou réserver un livre. Vous pouvez consulter les livres, mais pas les emprunter.',
+          'Accès refusé : seuls les étudiants inscrits peuvent emprunter un livre. Vous pouvez consulter les livres, mais pas les emprunter.',
       };
     }
 
@@ -373,38 +488,130 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       return {
         student: null,
         error:
-          'Accès refusé : seuls les étudiants inscrits peuvent emprunter ou réserver un livre. Vous pouvez consulter les livres, mais pas les emprunter.',
+          'Accès refusé : seuls les étudiants inscrits peuvent emprunter un livre. Vous pouvez consulter les livres, mais pas les emprunter.',
       };
     }
 
     return { student: found };
   };
 
-  // ========================================================
-  // LOAN FLOW:
-  // 1. When loaned -> copy passes to "Indisponible"
-  // ========================================================
+  // Student Authentication Flow
+  const login = (identifier: string, password?: string): { success: boolean; error?: string } => {
+    const cleanId = identifier.trim().toLowerCase();
+    const cleanMatriculeOnly = cleanId.replace(/[^a-z0-9]/g, '');
+
+    const student = members.find((m) => {
+      const mNum = m.memberNumber.toLowerCase();
+      const mNumClean = mNum.replace(/[^a-z0-9]/g, '');
+      const mEmail = (m.email || '').toLowerCase();
+      return mNum === cleanId || mNumClean === cleanMatriculeOnly || mEmail === cleanId;
+    });
+
+    if (!student) {
+      return {
+        success: false,
+        error: "Aucun étudiant inscrit trouvé avec ce numéro de matricule ou cette adresse e-mail. Veuillez procéder à votre inscription.",
+      };
+    }
+
+    if (student.status && student.status !== 'Actif') {
+      return {
+        success: false,
+        error: `Votre compte étudiant est actuellement « ${student.status} ». Veuillez contacter l'administration de la bibliothèque.`,
+      };
+    }
+
+    // Verify password if set and password was provided
+    if (student.password && password && student.password !== password) {
+      return {
+        success: false,
+        error: "Mot de passe incorrect. Veuillez vérifier vos identifiants.",
+      };
+    }
+
+    setCurrentUser(student);
+    addToast('success', 'Connexion réussie', `Bienvenue à la bibliothèque, ${student.firstName} ${student.lastName} (Matricule : ${student.memberNumber}).`);
+    return { success: true };
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}current_user`);
+    addToast('info', 'Déconnexion', 'Vous avez fermé votre session de bibliothèque.');
+  };
+
+  const registerStudent = (data: {
+    firstName: string;
+    lastName: string;
+    memberNumber: string;
+    email: string;
+    password?: string;
+    filiere?: string;
+    phone?: string;
+  }): { success: boolean; error?: string; student?: Member } => {
+    const cleanMatricule = data.memberNumber.trim().toUpperCase();
+    const cleanEmail = data.email.trim().toLowerCase();
+
+    // Check duplicate matricule or email
+    const duplicate = members.find(
+      (m) =>
+        m.memberNumber.trim().toUpperCase() === cleanMatricule ||
+        (m.email && m.email.trim().toLowerCase() === cleanEmail)
+    );
+
+    if (duplicate) {
+      return {
+        success: false,
+        error: `Un compte étudiant existe déjà avec le matricule ${cleanMatricule} ou l'e-mail ${cleanEmail}. Vous pouvez vous connecter directement.`,
+      };
+    }
+
+    const newStudent: Member = {
+      id: `etu-${Date.now()}`,
+      memberNumber: cleanMatricule,
+      firstName: data.firstName.trim(),
+      lastName: data.lastName.trim(),
+      email: cleanEmail,
+      phone: data.phone?.trim() || '',
+      filiere: data.filiere?.trim() || 'Étudiant universitaire',
+      category: 'Étudiant',
+      registrationDate: getTodayDateString(),
+      status: 'Actif',
+      maxLoans: 5,
+      password: data.password || 'bibliotech',
+    };
+
+    setMembers((prev) => [newStudent, ...prev]);
+    setCurrentUser(newStudent);
+    logActivity('member_new', `Nouvelle inscription : ${newStudent.firstName} ${newStudent.lastName} (${newStudent.memberNumber})`);
+    addToast('success', 'Inscription validée', `Compte créé avec succès ! Bienvenue ${newStudent.firstName}.`);
+
+    return { success: true, student: newStudent };
+  };
+
+  // Borrow Flow
   const borrowBook = (
     bookId: string,
     memberId: string,
-    copyId?: string
+    copyId?: string,
+    dueDateParam?: string
   ): { success: boolean; error?: string } => {
     const book = books.find((b) => b.id === bookId);
     const member = members.find((m) => m.id === memberId);
 
     if (!book) return { success: false, error: 'Ouvrage introuvable.' };
-    if (!member) return { success: false, error: 'Adhérent introuvable.' };
+    if (!member) return { success: false, error: 'Étudiant introuvable.' };
 
     if (member.status && member.status !== 'Actif') {
-      const err = `L’adhésion de ${member.firstName} ${member.lastName} est suspendue ou expirée.`;
-      addToast('warning', 'Prêt refusé', err);
+      const err = `L’inscription de ${member.firstName} ${member.lastName} est suspendue ou expirée.`;
+      addToast('warning', 'Emprunt refusé', err);
       return { success: false, error: err };
     }
 
     const maxAllowed = member.maxLoans ?? settings.defaultMaxLoans ?? 5;
-    const memberActiveLoans = loans.filter((l) => l.memberId === memberId && l.status === 'En cours');
+    const memberActiveLoans = loans.filter((l) => l.memberId === memberId && l.status !== 'Terminé');
     if (memberActiveLoans.length >= maxAllowed) {
-      const err = `Quota atteint : ${memberActiveLoans.length}/${maxAllowed} livres déjà empruntés.`;
+      const err = `Quota atteint : ${memberActiveLoans.length}/${maxAllowed} exemplaires déjà empruntés.`;
       addToast('warning', 'Quota dépassé', err);
       return { success: false, error: err };
     }
@@ -416,49 +623,44 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       if (!targetCopy) {
         return { success: false, error: 'Exemplaire introuvable.' };
       }
-      if (targetCopy.status === 'Indisponible' || (targetCopy.status as string) === 'Non disponible') {
-        const err = 'Cet exemplaire est déjà prêté (Indisponible).';
+      if (targetCopy.status === 'Emprunté') {
+        const err = `L'exemplaire ${targetCopy.copyIdentifier} est déjà emprunté.`;
         addToast('warning', 'Exemplaire indisponible', err);
         return { success: false, error: err };
       }
-      if (targetCopy.status === 'Réservé' && targetCopy.reservedForMemberId !== member.id) {
-        const err = `Cet exemplaire est réservé pour ${targetCopy.reservedForName || 'un autre lecteur'}.`;
-        addToast('warning', 'Exemplaire réservé', err);
-        return { success: false, error: err };
-      }
     } else {
-      // Pick copy reserved for this member if any, or first available copy
-      targetCopy =
-        book.copies?.find((c) => c.status === 'Réservé' && c.reservedForMemberId === member.id) ||
-        book.copies?.find((c) => c.status === 'Disponible');
-
+      targetCopy = book.copies?.find((c) => c.status === 'Disponible');
       if (!targetCopy) {
-        const err = `Aucun exemplaire disponible en rayon pour "${book.title}".`;
-        addToast('warning', 'Stock indisponible', err);
+        const err = `Aucun exemplaire disponible pour "${book.title}".`;
+        addToast('warning', 'Stock épuisé', err);
         return { success: false, error: err };
       }
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayDateString();
+    const finalDueDate = dueDateParam || addDaysToDate(todayStr, settings.defaultLoanDurationDays || 14);
 
     const newLoan: Loan = {
       id: `pret-${Date.now()}`,
       bookId: book.id,
       copyId: targetCopy.id,
       copyNumber: targetCopy.copyNumber,
+      copyIdentifier: targetCopy.copyIdentifier,
       exactLocation: targetCopy.exactLocation,
       bookTitle: book.title,
       bookAuthor: book.author,
       bookIsbn: book.isbn,
       memberId: member.id,
       memberName: `${member.firstName} ${member.lastName}`,
+      memberNumber: member.memberNumber,
       memberEmail: member.email || '',
       loanDate: todayStr,
+      dueDate: finalDueDate,
       returnDate: null,
       status: 'En cours',
     };
 
-    // Update copy status to "Indisponible"
+    // Update book copy in state
     setBooks((prev) =>
       prev.map((b) => {
         if (b.id === bookId) {
@@ -466,17 +668,21 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
             c.id === targetCopy!.id
               ? {
                   ...c,
-                  status: 'Indisponible' as const,
+                  status: 'Emprunté' as const,
                   borrowerName: `${member.firstName} ${member.lastName}`,
-                  reservedForName: undefined,
-                  reservedForMemberId: undefined,
+                  borrowerMemberNumber: member.memberNumber,
+                  borrowerMemberId: member.id,
+                  loanDate: todayStr,
+                  dueDate: finalDueDate,
                 }
               : c
           );
           const availableCount = updatedCopies.filter((c) => c.status === 'Disponible').length;
+          const borrowedCount = updatedCopies.filter((c) => c.status === 'Emprunté').length;
           return {
             ...b,
             availableCopies: availableCount,
+            borrowedCopies: borrowedCount,
             copies: updatedCopies,
           };
         }
@@ -484,46 +690,29 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       })
     );
 
-    // If there was a reservation for this copy, mark as Retiré
-    setReservations((prev) =>
-      prev.map((res) =>
-        res.copyId === targetCopy!.id && res.status === 'Réservé'
-          ? { ...res, status: 'Retiré' }
-          : res
-      )
-    );
-
     setLoans((prev) => [newLoan, ...prev]);
 
-    logActivity('loan', `Prêt de ${targetCopy.exactLocation} à ${member.firstName} ${member.lastName}`);
+    logActivity(
+      'loan',
+      `Prêt de l'exemplaire ${targetCopy.copyIdentifier} ("${book.title}") à ${member.firstName} ${member.lastName} (Retour prévu : ${finalDueDate})`
+    );
     addToast(
       'success',
-      'Prêt enregistré',
-      `Exemplaire n°${targetCopy.copyNumber} prêté à ${member.firstName} ${member.lastName} (Passé à Indisponible).`
+      'Emprunt enregistré',
+      `Exemplaire ${targetCopy.copyIdentifier} prêté à ${member.firstName} ${member.lastName}. Date de retour prévue : ${finalDueDate}.`
     );
 
     return { success: true };
   };
 
-  // ========================================================
-  // RETURN FLOW:
-  // 2. When returned -> copy passes back to "Disponible"
-  // ========================================================
+  // Return Flow
   const returnBook = (loanId: string, condition: BookCondition = 'Bon') => {
     const loan = loans.find((l) => l.id === loanId);
-    if (!loan || loan.status === 'Rendu') return;
+    if (!loan || loan.status === 'Terminé') return;
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayDateString();
 
-    // Check if this copy or book is reserved for someone
-    const pendingRes = reservations.find(
-      (r) =>
-        (r.copyId === loan.copyId || (r.bookId === loan.bookId && (!r.copyId || r.copyId === loan.copyId))) &&
-        r.status === 'Réservé'
-    );
-    const newStatus: CopyStatus = pendingRes ? 'Réservé' : 'Disponible';
-
-    // Set copy to new status
+    // Set copy to 'Disponible'
     setBooks((prev) =>
       prev.map((b) => {
         if (b.id === loan.bookId) {
@@ -531,19 +720,23 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (c.id === loan.copyId) {
               return {
                 ...c,
-                status: newStatus,
+                status: 'Disponible' as const,
                 condition,
                 borrowerName: undefined,
-                reservedForName: pendingRes ? pendingRes.memberName : undefined,
-                reservedForMemberId: pendingRes ? pendingRes.memberId : undefined,
+                borrowerMemberNumber: undefined,
+                borrowerMemberId: undefined,
+                loanDate: undefined,
+                dueDate: undefined,
               };
             }
             return c;
           });
           const availableCount = updatedCopies.filter((c) => c.status === 'Disponible').length;
+          const borrowedCount = updatedCopies.filter((c) => c.status === 'Emprunté').length;
           return {
             ...b,
             availableCopies: availableCount,
+            borrowedCopies: borrowedCount,
             copies: updatedCopies,
           };
         }
@@ -551,60 +744,51 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       })
     );
 
-    // Mark loan as Rendu
+    // Update loan
     setLoans((prev) =>
       prev.map((l) =>
         l.id === loanId
           ? {
               ...l,
               returnDate: todayStr,
-              status: 'Rendu',
+              status: 'Terminé',
               conditionOnReturn: condition,
             }
           : l
       )
     );
 
-    const msg = pendingRes
-      ? `Exemplaire n°${loan.copyNumber} de « ${loan.bookTitle} » remis sur son étagère et réservé pour ${pendingRes.memberName}.`
-      : `Exemplaire n°${loan.copyNumber} de « ${loan.bookTitle} » remis sur son étagère (Disponible).`;
-
-    logActivity('return', `Retour de l’exemplaire n°${loan.copyNumber} de "${loan.bookTitle}" par ${loan.memberName}`);
-    addToast('success', pendingRes ? 'Exemplaire remis & réservé' : 'Exemplaire remis en rayon', msg);
+    logActivity(
+      'return',
+      `Retour de l'exemplaire ${loan.copyIdentifier} ("${loan.bookTitle}") par ${loan.memberName}`
+    );
+    addToast(
+      'success',
+      'Retour enregistré',
+      `L'exemplaire ${loan.copyIdentifier} de "${loan.bookTitle}" a été rendu et remis en rayon (Disponible).`
+    );
   };
 
-  // ========================================================
-  // RETURN COPY TO EXACT SHELF (Manual step-by-step return)
-  // 1. Checks that the copy is NOT already 'Disponible'
-  // 2. Returns to shelf -> passes to 'Disponible'
-  // 3. If reserved for another member -> passes to 'Réservé'
-  // ========================================================
+  // Return copy directly by IDs
   const returnCopy = (
     bookId: string,
     copyId: string
-  ): { success: boolean; message: string; isReserved?: boolean } => {
+  ): { success: boolean; message: string } => {
     const book = books.find((b) => b.id === bookId);
-    if (!book) return { success: false, message: 'Ouvrage introuvable dans la bibliothèque.' };
+    if (!book) return { success: false, message: 'Ouvrage introuvable.' };
 
     const copy = (book.copies || []).find((c) => c.id === copyId);
-    if (!copy) return { success: false, message: 'Exemplaire introuvable sur cette étagère.' };
+    if (!copy) return { success: false, message: 'Exemplaire introuvable.' };
 
     if (copy.status === 'Disponible') {
-      const msg = `L'exemplaire n°${copy.copyNumber} de "${book.title}" est déjà présent sur l'étagère (Disponible).`;
-      addToast('warning', 'Déjà en rayon', msg);
+      const msg = `L'exemplaire ${copy.copyIdentifier} de "${book.title}" est déjà en rayon (Disponible).`;
+      addToast('warning', 'Déjà disponible', msg);
       return { success: false, message: msg };
     }
 
-    // Check if this copy or book is reserved for someone else
-    const pendingRes = reservations.find(
-      (r) =>
-        (r.copyId === copyId || (r.bookId === bookId && (!r.copyId || r.copyId === copyId))) &&
-        r.status === 'Réservé'
-    );
-    const newStatus: CopyStatus = pendingRes ? 'Réservé' : 'Disponible';
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayDateString();
 
-    // Update book copy in stock
+    // Update book copy
     setBooks((prev) =>
       prev.map((b) => {
         if (b.id === bookId) {
@@ -612,19 +796,23 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (c.id === copyId) {
               return {
                 ...c,
-                status: newStatus,
+                status: 'Disponible' as const,
                 condition: 'Bon' as const,
                 borrowerName: undefined,
-                reservedForName: pendingRes ? pendingRes.memberName : undefined,
-                reservedForMemberId: pendingRes ? pendingRes.memberId : undefined,
+                borrowerMemberNumber: undefined,
+                borrowerMemberId: undefined,
+                loanDate: undefined,
+                dueDate: undefined,
               };
             }
             return c;
           });
           const availableCount = updatedCopies.filter((c) => c.status === 'Disponible').length;
+          const borrowedCount = updatedCopies.filter((c) => c.status === 'Emprunté').length;
           return {
             ...b,
             availableCopies: availableCount,
+            borrowedCopies: borrowedCount,
             copies: updatedCopies,
           };
         }
@@ -632,49 +820,28 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       })
     );
 
-    // If there was an active loan for this copy, mark as Rendu
+    // Close corresponding active loan
     setLoans((prev) =>
       prev.map((l) =>
-        l.copyId === copyId && l.status === 'En cours'
+        (l.copyId === copyId || (l.bookId === bookId && l.copyNumber === copy.copyNumber)) && l.status !== 'Terminé'
           ? {
               ...l,
               returnDate: todayStr,
-              status: 'Rendu',
+              status: 'Terminé',
               conditionOnReturn: 'Bon',
             }
           : l
       )
     );
 
-    let resultMessage = `Exemplaire ${copy.copyNumber} de ${book.title} remis sur ${book.shelfName}, ${book.themeName}, ${book.sectionName}.`;
-    if (pendingRes) {
-      resultMessage += ` (Réservé pour ${pendingRes.memberName})`;
-    }
+    const resultMessage = `Exemplaire ${copy.copyIdentifier} de « ${book.title} » remis en rayon (Disponible).`;
+    logActivity('return', resultMessage);
+    addToast('success', 'Retour confirmé', resultMessage);
 
-    logActivity(
-      'return',
-      `Exemplaire n°${copy.copyNumber} de "${book.title}" remis à sa place sur ${book.shelfName} (${newStatus})`
-    );
-
-    addToast(
-      'success',
-      pendingRes ? 'Exemplaire remis & réservé' : 'Exemplaire remis sur son étagère',
-      resultMessage
-    );
-
-    return {
-      success: true,
-      message: resultMessage,
-      isReserved: !!pendingRes,
-    };
+    return { success: true, message: resultMessage };
   };
 
-  // ========================================================
-  // FORMULAIRE « RETOURNER UN LIVRE »
-  // Vérifie l'étagère, le titre, l'auteur, le numéro d'exemplaire,
-  // et son état « Indisponible » (emprunté).
-  // Si vérification correcte : passe à « Disponible » (ou « Réservé »).
-  // ========================================================
+  // Manual return form (shelf + title + author + copyNumber)
   const manualReturnBook = (params: {
     sectionId: string;
     themeId: string;
@@ -682,16 +849,13 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     title: string;
     author: string;
     copyNumber: number;
-  }): { success: boolean; message: string; isReserved?: boolean } => {
+  }): { success: boolean; message: string } => {
     const sec = sections.find((s) => s.id === params.sectionId);
     const thm = sec?.themes.find((t) => t.id === params.themeId);
     const shf = thm?.shelves.find((sh) => sh.id === params.shelfId);
 
     if (!sec || !thm || !shf) {
-      return {
-        success: false,
-        message: 'Emplacement invalide : section, thématique ou étagère introuvable.',
-      };
+      return { success: false, message: 'Emplacement invalide (section, thématique ou étagère introuvable).' };
     }
 
     const cleanStr = (s: string) =>
@@ -706,69 +870,39 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     const targetAuthor = cleanStr(params.author);
     const targetCopyNum = Number(params.copyNumber);
 
-    if (!targetTitle) {
-      return { success: false, message: 'Veuillez saisir le titre de l’ouvrage.' };
-    }
-    if (!targetAuthor) {
-      return { success: false, message: 'Veuillez saisir l’auteur de l’ouvrage.' };
-    }
+    if (!targetTitle) return { success: false, message: 'Veuillez saisir le titre de l’ouvrage.' };
+    if (!targetAuthor) return { success: false, message: 'Veuillez saisir l’auteur de l’ouvrage.' };
     if (isNaN(targetCopyNum) || targetCopyNum < 1) {
-      return { success: false, message: 'Veuillez saisir un numéro d’exemplaire valide (ex : 2).' };
+      return { success: false, message: 'Veuillez saisir un numéro d’exemplaire valide.' };
     }
 
-    // Vérifie que le livre (titre + auteur) existe bien sur cette étagère
     const bookOnShelf = books.find((b) => {
       if (b.shelfId !== shf.id) return false;
       const bTitle = cleanStr(b.title);
       const bAuthor = cleanStr(b.author);
-      const titleMatches = bTitle === targetTitle || bTitle.includes(targetTitle) || targetTitle.includes(bTitle);
-      const authorMatches = bAuthor === targetAuthor || bAuthor.includes(targetAuthor) || targetAuthor.includes(bAuthor);
-      return titleMatches && authorMatches;
+      return (bTitle.includes(targetTitle) || targetTitle.includes(bTitle)) &&
+             (bAuthor.includes(targetAuthor) || targetAuthor.includes(bAuthor));
     });
 
     if (!bookOnShelf) {
-      return {
-        success: false,
-        message: 'Aucun exemplaire emprunté ne correspond à ces informations.',
-      };
+      return { success: false, message: 'Aucun exemplaire emprunté ne correspond à ces informations.' };
     }
 
-    // Vérifie l'exemplaire indiqué
     const targetCopy = (bookOnShelf.copies || []).find((c) => c.copyNumber === targetCopyNum);
     if (!targetCopy) {
-      return {
-        success: false,
-        message: 'Aucun exemplaire emprunté ne correspond à ces informations.',
-      };
+      return { success: false, message: 'Aucun exemplaire emprunté ne correspond à ce numéro.' };
     }
 
-    // Règle : Un exemplaire déjà « Disponible » ne peut pas être retourné, car il est déjà sur l'étagère.
     if (targetCopy.status === 'Disponible') {
       return {
         success: false,
-        message: 'Aucun exemplaire emprunté ne correspond à ces informations. (Cet exemplaire est déjà disponible sur l’étagère).',
+        message: `L'exemplaire ${targetCopy.copyIdentifier} est déjà présent sur l'étagère (Disponible).`,
       };
     }
 
-    // Vérifie que l'exemplaire indiqué est bien « Indisponible » (emprunté)
-    if (targetCopy.status !== 'Indisponible' && (targetCopy.status as string) !== 'Non disponible') {
-      return {
-        success: false,
-        message: 'Aucun exemplaire emprunté ne correspond à ces informations.',
-      };
-    }
+    const todayStr = getTodayDateString();
 
-    // Vérifie s'il était réservé pour une autre personne
-    const pendingRes = reservations.find(
-      (r) =>
-        (r.copyId === targetCopy.id || (r.bookId === bookOnShelf.id && (!r.copyId || r.copyId === targetCopy.id))) &&
-        r.status === 'Réservé'
-    );
-
-    const newStatus: CopyStatus = pendingRes ? 'Réservé' : 'Disponible';
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Remise à la place indiquée avec mise à jour du statut
+    // Update book copies
     setBooks((prev) =>
       prev.map((b) => {
         if (b.id === bookOnShelf.id) {
@@ -776,19 +910,22 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
             if (c.id === targetCopy.id) {
               return {
                 ...c,
-                status: newStatus,
+                status: 'Disponible' as const,
                 borrowerName: undefined,
-                exactLocation: `Exemplaire ${targetCopy.copyNumber} de ${bookOnShelf.title}, ${sec.code}, ${thm.name}, ${shf.name}`,
-                reservedForName: pendingRes ? pendingRes.memberName : undefined,
-                reservedForMemberId: pendingRes ? pendingRes.memberId : undefined,
+                borrowerMemberNumber: undefined,
+                borrowerMemberId: undefined,
+                loanDate: undefined,
+                dueDate: undefined,
               };
             }
             return c;
           });
           const availableCount = updatedCopies.filter((c) => c.status === 'Disponible').length;
+          const borrowedCount = updatedCopies.filter((c) => c.status === 'Emprunté').length;
           return {
             ...b,
             availableCopies: availableCount,
+            borrowedCopies: borrowedCount,
             copies: updatedCopies,
           };
         }
@@ -796,172 +933,31 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       })
     );
 
-    // Clôture du prêt en cours correspondant
+    // Close loan
     setLoans((prev) =>
       prev.map((l) =>
         (l.copyId === targetCopy.id || (l.bookId === bookOnShelf.id && l.copyNumber === targetCopy.copyNumber)) &&
-        l.status === 'En cours'
+        l.status !== 'Terminé'
           ? {
               ...l,
               returnDate: todayStr,
-              status: 'Rendu',
+              status: 'Terminé',
               conditionOnReturn: targetCopy.condition || 'Bon',
             }
           : l
       )
     );
 
-    const shelfNameLower = shf.name.toLowerCase().startsWith('étagère')
-      ? shf.name.toLowerCase()
-      : shf.name;
-
-    // Format requis : « Exemplaire 2 de Peter Pan remis à l'étagère 2, Aventures, Section B. »
-    const confirmationMsg = `Exemplaire ${targetCopy.copyNumber} de ${bookOnShelf.title} remis à l'${shelfNameLower}, ${thm.name}, ${sec.code}.`;
-
+    const confirmationMsg = `Exemplaire ${targetCopy.copyIdentifier} de « ${bookOnShelf.title} » remis sur ${shf.name}, ${thm.name}, ${sec.code} (Disponible).`;
     logActivity('return', confirmationMsg);
     addToast('success', 'Retour confirmé', confirmationMsg);
 
-    return {
-      success: true,
-      message: confirmationMsg,
-      isReserved: !!pendingRes,
-    };
-  };
-
-  // ========================================================
-  // RESERVATION FLOW:
-  // 3. When an available copy is reserved -> passes to "Réservé"
-  //    When cancelled -> passes back to "Disponible"
-  //    When claimed by the reserving user -> passes to "Non disponible"
-  // ========================================================
-  const reserveBook = (
-    bookId: string,
-    memberId: string,
-    copyId?: string
-  ): { success: boolean; error?: string } => {
-    const book = books.find((b) => b.id === bookId);
-    const member = members.find((m) => m.id === memberId);
-
-    if (!book || !member) return { success: false, error: 'Livre ou membre introuvable' };
-
-    // Find copy to reserve
-    let targetCopy: BookCopy | undefined;
-    if (copyId) {
-      targetCopy = book.copies?.find((c) => c.id === copyId);
-      if (!targetCopy || targetCopy.status !== 'Disponible') {
-        const err = 'Seul un exemplaire actuellement Disponible peut être réservé.';
-        addToast('warning', 'Réservation impossible', err);
-        return { success: false, error: err };
-      }
-    } else {
-      targetCopy = book.copies?.find((c) => c.status === 'Disponible');
-      if (!targetCopy) {
-        const err = 'Aucun exemplaire disponible à mettre de côté pour le moment.';
-        addToast('warning', 'Aucun exemplaire libre', err);
-        return { success: false, error: err };
-      }
-    }
-
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    const newReservation: Reservation = {
-      id: `res-${Date.now()}`,
-      bookId: book.id,
-      copyId: targetCopy.id,
-      copyNumber: targetCopy.copyNumber,
-      bookTitle: book.title,
-      memberId: member.id,
-      memberName: `${member.firstName} ${member.lastName}`,
-      reservationDate: todayStr,
-      status: 'Réservé',
-    };
-
-    // Update copy status to "Réservé"
-    setBooks((prev) =>
-      prev.map((b) => {
-        if (b.id === bookId) {
-          const updatedCopies = (b.copies || []).map((c) =>
-            c.id === targetCopy!.id
-              ? {
-                  ...c,
-                  status: 'Réservé' as const,
-                  reservedForName: `${member.firstName} ${member.lastName}`,
-                  reservedForMemberId: member.id,
-                }
-              : c
-          );
-          const availableCount = updatedCopies.filter((c) => c.status === 'Disponible').length;
-          return {
-            ...b,
-            availableCopies: availableCount,
-            copies: updatedCopies,
-          };
-        }
-        return b;
-      })
-    );
-
-    setReservations((prev) => [newReservation, ...prev]);
-
-    logActivity('reservation', `Réservation de ${targetCopy.exactLocation} pour ${member.firstName} ${member.lastName}`);
-    addToast(
-      'success',
-      'Exemplaire réservé',
-      `Exemplaire n°${targetCopy.copyNumber} mis de côté pour ${member.firstName} ${member.lastName} (Statut: Réservé).`
-    );
-
-    return { success: true };
-  };
-
-  const cancelReservation = (reservationId: string) => {
-    const res = reservations.find((r) => r.id === reservationId);
-    if (!res) return;
-
-    // Set copy back to "Disponible"
-    setBooks((prev) =>
-      prev.map((b) => {
-        if (b.id === res.bookId) {
-          const updatedCopies = (b.copies || []).map((c) => {
-            if (c.id === res.copyId && c.status === 'Réservé') {
-              return {
-                ...c,
-                status: 'Disponible' as const,
-                reservedForName: undefined,
-                reservedForMemberId: undefined,
-              };
-            }
-            return c;
-          });
-          const availableCount = updatedCopies.filter((c) => c.status === 'Disponible').length;
-          return {
-            ...b,
-            availableCopies: availableCount,
-            copies: updatedCopies,
-          };
-        }
-        return b;
-      })
-    );
-
-    setReservations((prev) =>
-      prev.map((r) => (r.id === reservationId ? { ...r, status: 'Annulée' } : r))
-    );
-
-    addToast('info', 'Réservation annulée', 'L’exemplaire est à nouveau Disponible.');
-  };
-
-  const claimReservation = (reservationId: string): { success: boolean; error?: string } => {
-    const res = reservations.find((r) => r.id === reservationId);
-    if (!res || res.status !== 'Réservé') {
-      return { success: false, error: 'Réservation non valide ou déjà retirée.' };
-    }
-
-    return borrowBook(res.bookId, res.memberId, res.copyId);
+    return { success: true, message: confirmationMsg };
   };
 
   const updateSettings = (newSettings: LibrarySettings) => {
     setSettings(newSettings);
-    addToast('success', 'Paramètres sauvegardés', 'Configuration mise à jour.');
+    addToast('success', 'Paramètres mis à jour', 'Configuration enregistrée.');
   };
 
   const resetToDefaults = () => {
@@ -970,22 +966,20 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     setBooks(INITIAL_BOOKS);
     setMembers(INITIAL_MEMBERS);
     setLoans(INITIAL_LOANS);
-    setReservations(INITIAL_RESERVATIONS);
     setActivityLogs(INITIAL_LOGS);
     localStorage.clear();
-    addToast('info', 'Données réinitialisées', 'Catalogue et données réinitialisés.');
+    addToast('info', 'Données réinitialisées', 'Jeu de démonstration rechargé.');
   };
 
   const exportDatabase = (): string => {
     const data = {
-      version: '3.0',
+      version: '5.0',
       exportDate: new Date().toISOString(),
       sections,
       settings,
       books,
       members,
       loans,
-      reservations,
       activityLogs,
     };
     return JSON.stringify(data, null, 2);
@@ -994,35 +988,32 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
   const importDatabase = (jsonStr: string): boolean => {
     try {
       const data = JSON.parse(jsonStr);
-      if (!data.books || !data.members) {
-        throw new Error('Structure JSON invalide.');
-      }
+      if (!data.books || !data.members) throw new Error('Format invalide');
       if (data.sections) setSections(data.sections);
       if (data.settings) setSettings(data.settings);
       if (data.books) setBooks(data.books);
       if (data.members) setMembers(data.members);
       if (data.loans) setLoans(data.loans);
-      if (data.reservations) setReservations(data.reservations);
       if (data.activityLogs) setActivityLogs(data.activityLogs);
-      addToast('success', 'Importation réussie', 'Données restaurées.');
+      addToast('success', 'Restauration réussie', 'Données importées avec succès.');
       return true;
     } catch {
-      addToast('error', 'Erreur d’importation', 'Fichier invalide.');
+      addToast('error', 'Erreur d’import', 'Fichier de sauvegarde non reconnu.');
       return false;
     }
   };
 
-  // Stats across the 3 statuses
+  // Live metrics computation
   const stats = useMemo(() => {
     const totalTitles = books.length;
     const allCopies = books.flatMap((b) => b.copies || []);
     const totalBooks = allCopies.length;
     const availableCopies = allCopies.filter((c) => c.status === 'Disponible').length;
-    const borrowedCopies = allCopies.filter((c) => c.status === 'Indisponible' || (c.status as string) === 'Non disponible').length;
-    const reservedCopies = allCopies.filter((c) => c.status === 'Réservé').length;
+    const borrowedCopies = allCopies.filter((c) => c.status === 'Emprunté').length;
 
-    const activeLoans = loans.filter((l) => l.status === 'En cours');
-    const activeReservations = reservations.filter((r) => r.status === 'Réservé');
+    const activeLoans = loans.filter((l) => l.status !== 'Terminé');
+    const today = getTodayDateString();
+    const overdueLoans = activeLoans.filter((l) => l.dueDate < today);
 
     const totalMembers = members.length;
     const activeMembersCount = members.filter((m) => m.status === 'Actif').length;
@@ -1032,13 +1023,12 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       totalTitles,
       availableCopies,
       borrowedCopies,
-      reservedCopies,
       activeLoansCount: activeLoans.length,
-      activeReservationsCount: activeReservations.length,
+      overdueLoansCount: overdueLoans.length,
       totalMembers,
       activeMembersCount,
     };
-  }, [books, loans, reservations, members]);
+  }, [books, loans, members]);
 
   return (
     <LibraryContext.Provider
@@ -1047,27 +1037,28 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
         books,
         members,
         loans,
-        reservations,
         settings,
         activityLogs,
         toasts,
         addToast,
         removeToast,
+        currentUser,
+        login,
+        logout,
+        registerStudent,
         addBook,
         updateBook,
         deleteBook,
         addMember,
         updateMember,
         deleteMember,
-        renewMemberCard,
         verifyStudent,
         borrowBook,
         returnBook,
         returnCopy,
         manualReturnBook,
-        reserveBook,
-        cancelReservation,
-        claimReservation,
+        getLoanOverdueInfo,
+        getCopyLiveStatus,
         updateSettings,
         resetToDefaults,
         exportDatabase,

@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, BookOpen, User, Check, AlertCircle, MapPin, ChevronRight, ArrowLeft } from 'lucide-react';
-import { useLibrary } from '../context/LibraryContext';
-import { Book, BookCopy, Member } from '../types/library';
+import {
+  X,
+  Calendar,
+  BookOpen,
+  User,
+  Check,
+  QrCode,
+  CheckCircle2,
+  AlertTriangle,
+} from 'lucide-react';
+import { useLibrary, getTodayDateString, addDaysToDate } from '../context/LibraryContext';
+import { Book, BookCopy, Member, Loan } from '../types/library';
+import { QRScannerModal } from './QRScannerModal';
 
 interface NewLoanModalProps {
   isOpen: boolean;
@@ -9,6 +19,7 @@ interface NewLoanModalProps {
   preselectedBook?: Book | null;
   preselectedCopy?: BookCopy | null;
   preselectedMember?: Member | null;
+  onSwitchToReturn?: (loanId: string) => void;
 }
 
 export const NewLoanModal: React.FC<NewLoanModalProps> = ({
@@ -17,25 +28,23 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
   preselectedBook,
   preselectedCopy,
   preselectedMember,
+  onSwitchToReturn,
 }) => {
-  const { sections, books, members, loans, borrowBook, settings } = useLibrary();
+  const { books, members, loans, borrowBook, settings } = useLibrary();
 
   const [selectedBookId, setSelectedBookId] = useState<string>(preselectedBook?.id || '');
   const [selectedCopyId, setSelectedCopyId] = useState<string>(preselectedCopy?.id || '');
   const [selectedMemberId, setSelectedMemberId] = useState<string>(preselectedMember?.id || '');
+  const [dueDate, setDueDate] = useState<string>(() =>
+    addDaysToDate(getTodayDateString(), settings.defaultLoanDurationDays || 14)
+  );
 
-  // Manual step navigation for picking a book if not preselected
-  const [pickSectionId, setPickSectionId] = useState<string>('');
-  const [pickThemeId, setPickThemeId] = useState<string>('');
-  const [pickShelfId, setPickShelfId] = useState<string>('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannedNotification, setScannedNotification] = useState<string | null>(null);
 
-  // Sync if preselected props change
   useEffect(() => {
     if (preselectedBook) {
       setSelectedBookId(preselectedBook.id);
-      setPickSectionId(preselectedBook.sectionId);
-      setPickThemeId(preselectedBook.themeId);
-      setPickShelfId(preselectedBook.shelfId);
     }
   }, [preselectedBook]);
 
@@ -46,59 +55,80 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
   }, [preselectedCopy]);
 
   useEffect(() => {
-    if (preselectedMember) setSelectedMemberId(preselectedMember.id);
+    if (preselectedMember) {
+      setSelectedMemberId(preselectedMember.id);
+    }
   }, [preselectedMember]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setDueDate(addDaysToDate(getTodayDateString(), settings.defaultLoanDurationDays || 14));
+      setScannedNotification(null);
+    }
+  }, [isOpen, settings.defaultLoanDurationDays]);
 
   if (!isOpen) return null;
 
-  // Selected entities
   const selectedBook = books.find((b) => b.id === selectedBookId);
-  const selectedCopy = selectedBook?.copies?.find((c) => c.id === selectedCopyId) || selectedBook?.copies?.find((c) => c.status === 'Disponible');
+  const availableCopies = selectedBook?.copies?.filter((c) => c.status === 'Disponible') || [];
+  const selectedCopy = selectedBook?.copies?.find((c) => c.id === selectedCopyId) || availableCopies[0];
   const selectedMember = members.find((m) => m.id === selectedMemberId);
 
-  // Active loans for member
   const memberActiveLoansCount = selectedMember
-    ? loans.filter((l) => l.memberId === selectedMember.id && l.status !== 'Rendu').length
+    ? loans.filter((l) => l.memberId === selectedMember.id && l.status !== 'Terminé').length
     : 0;
+
+  const handleScanSuccess = (result: { book: Book; copy: BookCopy; loan?: Loan }) => {
+    if (result.copy.status === 'Emprunté' || result.loan) {
+      // Copy is already borrowed!
+      if (result.loan && onSwitchToReturn) {
+        onClose();
+        onSwitchToReturn(result.loan.id);
+        return;
+      }
+      setScannedNotification(
+        `Attention : L'exemplaire ${result.copy.copyIdentifier} est actuellement déjà emprunté.`
+      );
+      return;
+    }
+
+    setSelectedBookId(result.book.id);
+    setSelectedCopyId(result.copy.id);
+    setScannedNotification(
+      `Exemplaire ${result.copy.copyIdentifier} de "${result.book.title}" identifié par code QR.`
+    );
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBookId || !selectedMemberId) return;
 
-    const res = borrowBook(selectedBookId, selectedMemberId, selectedCopy?.id);
+    const res = borrowBook(selectedBookId, selectedMemberId, selectedCopy?.id, dueDate);
     if (res.success) {
       onClose();
       setSelectedBookId('');
       setSelectedCopyId('');
       setSelectedMemberId('');
-      setPickSectionId('');
-      setPickThemeId('');
-      setPickShelfId('');
+      setScannedNotification(null);
     }
   };
 
-  // Hierarchy helpers for manual picking
-  const activeSection = sections.find((s) => s.id === pickSectionId);
-  const activeTheme = activeSection?.themes.find((t) => t.id === pickThemeId);
-  const activeShelf = activeTheme?.shelves.find((sh) => sh.id === pickShelfId);
-  const availableBooksOnShelf = pickShelfId
-    ? books.filter((b) => b.shelfId === pickShelfId && b.availableCopies > 0)
-    : [];
-
   return (
-    <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl border border-slate-200 max-w-xl w-full p-5 sm:p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 max-w-lg w-full p-5 sm:p-6 shadow-2xl relative max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Enregistrer un prêt au guichet</h3>
+            <h3 className="text-sm font-bold text-slate-900">Enregistrer un emprunt</h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Sélection de l'adhérent et de l'exemplaire physique rangé en médiathèque.
+              Prêt d'un exemplaire à un étudiant inscrit.
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
+            aria-label="Fermer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -106,10 +136,41 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
-          {/* Step 1: Select Member */}
+          {/* Quick QR Scanner Option */}
+          <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-indigo-900">
+              <QrCode className="w-5 h-5 text-indigo-600 shrink-0" />
+              <div>
+                <span className="font-bold text-xs block">Scanner le QR de l'exemplaire</span>
+                <span className="text-[11px] text-indigo-700">
+                  Évitez de chercher l'ouvrage à la main en scannant directement l'étiquette.
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg text-xs shadow-xs cursor-pointer shrink-0 transition-colors"
+            >
+              Scanner QR
+            </button>
+          </div>
+
+          {/* Scanned Feedback */}
+          {scannedNotification && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{scannedNotification}</span>
+            </div>
+          )}
+
+          {/* Step 1: Select Student */}
           <div>
             <label className="block font-semibold text-slate-800 mb-1.5 flex items-center justify-between">
-              <span>1. Étudiant inscrit emprunteur</span>
+              <span className="flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-indigo-600" />
+                <span>1. Étudiant emprunteur *</span>
+              </span>
               {selectedMember && (
                 <span className="font-normal text-slate-500">
                   Prêts : {memberActiveLoansCount}/{selectedMember.maxLoans || 5}
@@ -121,205 +182,142 @@ export const NewLoanModal: React.FC<NewLoanModalProps> = ({
               value={selectedMemberId}
               onChange={(e) => setSelectedMemberId(e.target.value)}
               required
-              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs focus:ring-1 focus:ring-indigo-500"
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:bg-white focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="">-- Choisir un étudiant inscrit --</option>
+              <option value="">-- Choisir un étudiant --</option>
               {members.map((m) => {
-                const count = loans.filter((l) => l.memberId === m.id && l.status !== 'Rendu').length;
+                const count = loans.filter((l) => l.memberId === m.id && l.status !== 'Terminé').length;
                 const maxAllowed = m.maxLoans || 5;
                 const isFull = count >= maxAllowed;
-                const isInactive = m.status && m.status !== 'Actif';
                 return (
                   <option
                     key={m.id}
                     value={m.id}
-                    disabled={isFull || !!isInactive}
+                    disabled={isFull}
                   >
-                    {m.firstName} {m.lastName} (Matricule : {m.memberNumber}) [{count} prêt(s)]
+                    {m.lastName} {m.firstName} (Matricule : {m.memberNumber}) [{count} prêt(s) en cours]
                   </option>
                 );
               })}
             </select>
           </div>
 
-          {/* Step 2: Select Book via Physical Library Navigation */}
+          {/* Step 2: Select Book */}
           <div>
             <label className="block font-semibold text-slate-800 mb-1.5 flex items-center justify-between">
-              <span>2. Choix de l'exemplaire physique</span>
+              <span className="flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                <span>2. Ouvrage à emprunter *</span>
+              </span>
               {selectedBook && (
                 <span className="font-normal text-emerald-700 font-semibold">
-                  {selectedBook.availableCopies} en rayon
+                  {selectedBook.availableCopies} disponible{selectedBook.availableCopies > 1 ? 's' : ''}
                 </span>
               )}
             </label>
 
-            {selectedBook ? (
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-slate-900 text-sm">{selectedBook.title}</div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedBookId('');
-                      setSelectedCopyId('');
-                    }}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+            <select
+              value={selectedBookId}
+              onChange={(e) => {
+                setSelectedBookId(e.target.value);
+                const book = books.find((b) => b.id === e.target.value);
+                const freeCopy = book?.copies?.find((c) => c.status === 'Disponible');
+                setSelectedCopyId(freeCopy?.id || '');
+              }}
+              required
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:bg-white focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">-- Choisir un ouvrage ou scanner le QR ci-dessus --</option>
+              {books.map((b) => {
+                const isAvailable = b.availableCopies > 0;
+                return (
+                  <option
+                    key={b.id}
+                    value={b.id}
+                    disabled={!isAvailable}
                   >
-                    Changer d'ouvrage
-                  </button>
-                </div>
-                <div className="text-[11px] text-slate-600">
-                  {selectedBook.author} · {selectedBook.isbn}
-                </div>
-                {selectedCopy && (
-                  <div className="text-[11px] text-slate-800 font-medium pt-1 border-t border-slate-200 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                    <span>{selectedCopy.exactLocation}</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
-                <p className="text-[11px] text-slate-500">
-                  Parcourez les rayons de la bibliothèque pour localiser l'ouvrage à prêter :
-                </p>
-
-                {/* Level 1: Section */}
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">1. Section :</label>
-                  <select
-                    value={pickSectionId}
-                    onChange={(e) => {
-                      setPickSectionId(e.target.value);
-                      setPickThemeId('');
-                      setPickShelfId('');
-                    }}
-                    className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-900 text-xs"
-                  >
-                    <option value="">-- Sélectionner une section --</option>
-                    {sections.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.code} : {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Level 2: Theme */}
-                {activeSection && (
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">2. Rayon / Thématique :</label>
-                    <select
-                      value={pickThemeId}
-                      onChange={(e) => {
-                        setPickThemeId(e.target.value);
-                        setPickShelfId('');
-                      }}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-900 text-xs"
-                    >
-                      <option value="">-- Sélectionner une thématique --</option>
-                      {activeSection.themes.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Level 3: Shelf */}
-                {activeTheme && (
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">3. Étagère :</label>
-                    <select
-                      value={pickShelfId}
-                      onChange={(e) => setPickShelfId(e.target.value)}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-900 text-xs"
-                    >
-                      <option value="">-- Sélectionner l'étagère --</option>
-                      {activeTheme.shelves.map((sh) => (
-                        <option key={sh.id} value={sh.id}>
-                          {sh.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Level 4: Books on shelf */}
-                {pickShelfId && (
-                  <div className="space-y-1 pt-2 border-t border-slate-200">
-                    <label className="text-[11px] font-medium text-slate-700">
-                      4. Livres rangés sur cette étagère :
-                    </label>
-                    {availableBooksOnShelf.length === 0 ? (
-                      <p className="text-[11px] text-rose-600">
-                        Aucun exemplaire disponible sur cette étagère.
-                      </p>
-                    ) : (
-                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                        {availableBooksOnShelf.map((b) => (
-                          <button
-                            key={b.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedBookId(b.id);
-                              const freeCopy = b.copies?.find((c) => c.status === 'Disponible');
-                              if (freeCopy) setSelectedCopyId(freeCopy.id);
-                            }}
-                            className="w-full text-left p-2 rounded bg-white hover:bg-indigo-50 border border-slate-200 flex items-center justify-between"
-                          >
-                            <div>
-                              <div className="font-semibold text-slate-900">{b.title}</div>
-                              <div className="text-[11px] text-slate-500">{b.author}</div>
-                            </div>
-                            <span className="text-[11px] font-mono text-emerald-700 font-semibold">
-                              {b.availableCopies} dispo
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+                    {b.title} — {b.author} ({b.availableCopies}/{b.totalCopies} disponible{b.availableCopies > 1 ? 's' : ''})
+                  </option>
+                );
+              })}
+            </select>
           </div>
 
-          {/* Copy status flow notice */}
-          <div className="bg-rose-50/60 rounded-lg p-3 border border-rose-200 text-xs text-rose-900 space-y-1">
-            <div className="font-semibold flex items-center gap-1.5 text-rose-800">
-              <span className="w-2 h-2 rounded-full bg-rose-600"></span>
-              <span>Passage immédiat à l'état « Indisponible »</span>
+          {/* Step 2b: Choose copy if multiple available */}
+          {selectedBook && availableCopies.length > 0 && (
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+              <label className="block font-semibold text-slate-800">
+                Numéro d'exemplaire :
+              </label>
+              <select
+                value={selectedCopy?.id || ''}
+                onChange={(e) => setSelectedCopyId(e.target.value)}
+                className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-900 font-mono text-xs"
+              >
+                {availableCopies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.copyIdentifier} (Exemplaire n°{c.copyNumber}) — État : {c.condition}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500">
+                📍 {selectedBook.sectionName} · {selectedBook.shelfName}
+              </p>
             </div>
-            <p className="text-[11px] text-rose-700 leading-relaxed">
-              Une fois le prêt validé, cet exemplaire sera marqué comme prêté et ne pourra plus être emprunté par un autre adhérent jusqu'à son retour en rayon.
-            </p>
+          )}
+
+          {/* Step 3: Due Date */}
+          <div>
+            <label className="block font-semibold text-slate-800 mb-1 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <span>3. Date de retour prévue *</span>
+            </label>
+            <input
+              type="date"
+              required
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono text-xs focus:bg-white focus:ring-2 focus:ring-indigo-500"
+            />
           </div>
 
-          {/* Buttons */}
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+          {/* Immediate effect notice */}
+          <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-200 text-xs text-emerald-950">
+            Cet exemplaire sera marqué comme <strong>« Emprunté »</strong> et son code QR sera immédiatement mis à jour avec le nom et matricule de l'étudiant.
+          </div>
+
+          {/* Action buttons */}
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg"
+              className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg cursor-pointer"
             >
               Annuler
             </button>
             <button
               type="submit"
               disabled={!selectedBookId || !selectedMemberId}
-              className={`px-4 py-2 text-xs font-semibold text-white rounded-lg transition-colors shadow-sm ${
+              className={`px-4 py-2 text-xs font-semibold text-white rounded-xl transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer ${
                 !selectedBookId || !selectedMemberId
                   ? 'bg-slate-400 cursor-not-allowed'
                   : 'bg-indigo-600 hover:bg-indigo-500'
               }`}
             >
-              Valider le prêt
+              <Check className="w-3.5 h-3.5" />
+              <span>Valider l'emprunt</span>
             </button>
           </div>
         </form>
       </div>
+
+      {/* QR Scanner Submodal */}
+      <QRScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        mode="loan"
+        onScanSuccess={handleScanSuccess}
+      />
     </div>
   );
 };

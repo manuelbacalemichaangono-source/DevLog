@@ -2,10 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   X,
   GraduationCap,
-  AlertCircle,
   Check,
   BookOpen,
-  ArrowRight,
   ShieldAlert,
 } from 'lucide-react';
 import { useLibrary } from '../context/LibraryContext';
@@ -14,7 +12,6 @@ import { Book, BookCopy, Member } from '../types/library';
 interface StudentIdentificationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  actionType: 'borrow' | 'reserve';
   book?: Book | null;
   copy?: BookCopy | null;
   onIdentified: (student: Member) => void;
@@ -23,7 +20,6 @@ interface StudentIdentificationModalProps {
 export const StudentIdentificationModal: React.FC<StudentIdentificationModalProps> = ({
   isOpen,
   onClose,
-  actionType,
   book,
   copy,
   onIdentified,
@@ -51,16 +47,13 @@ export const StudentIdentificationModal: React.FC<StudentIdentificationModalProp
     const { student, error } = verifyStudent(matricule, lastName);
 
     if (!student || error) {
-      // Message exact requis :
-      // « Accès refusé : seuls les étudiants inscrits peuvent emprunter ou réserver un livre. Vous pouvez consulter les livres, mais pas les emprunter. »
       setErrorMessage(
         error ||
-          'Accès refusé : seuls les étudiants inscrits peuvent emprunter ou réserver un livre. Vous pouvez consulter les livres, mais pas les emprunter.'
+          'Accès refusé : seuls les étudiants inscrits peuvent emprunter un livre. Vous pouvez consulter les livres, mais pas les emprunter.'
       );
       return;
     }
 
-    // Succès : l'étudiant est identifié et l'action continue
     onIdentified(student);
     onClose();
   };
@@ -70,12 +63,6 @@ export const StudentIdentificationModal: React.FC<StudentIdentificationModalProp
     setLastName(m.lastName);
     setErrorMessage(null);
   };
-
-  const actionLabel = actionType === 'borrow' ? 'emprunter' : 'réserver';
-  const modalTitle =
-    actionType === 'borrow'
-      ? 'Identification · Emprunter un livre'
-      : 'Identification · Réserver un exemplaire';
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
@@ -87,8 +74,8 @@ export const StudentIdentificationModal: React.FC<StudentIdentificationModalProp
               <GraduationCap className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900">{modalTitle}</h3>
-              <p className="text-[11px] text-slate-500">Contrôle d'accès étudiant obligatoire</p>
+              <h3 className="text-sm font-bold text-slate-900">Identification de l'Étudiant</h3>
+              <p className="text-[11px] text-slate-500">Contrôle d'accès obligatoire pour emprunter</p>
             </div>
           </div>
           <button
@@ -108,17 +95,17 @@ export const StudentIdentificationModal: React.FC<StudentIdentificationModalProp
             <div className="min-w-0 flex-1">
               <div className="font-bold text-slate-900 truncate">{book.title}</div>
               <div className="text-slate-500 text-[11px] truncate">
-                {book.author} · Exemplaire n°{copy.copyNumber}
+                {book.author} · Exemplaire n°{copy.copyNumber} ({copy.copyIdentifier})
               </div>
               <div className="mt-1 text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                <span>{copy.exactLocation}</span>
+                <span>Disponible en rayon</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Message d'erreur bloquant en cas de non correspondance */}
+        {/* Message d'erreur bloquant */}
         {errorMessage && (
           <div className="mt-4 p-3.5 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-3 text-xs text-rose-900 shadow-xs animate-in fade-in">
             <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
@@ -168,7 +155,7 @@ export const StudentIdentificationModal: React.FC<StudentIdentificationModalProp
           {/* Raccourcis d'exemple pour tester facilement */}
           <div className="pt-2 border-t border-slate-100">
             <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">
-              Étudiants inscrits (cliquez pour tester) :
+              Étudiants inscrits (cliquez pour tester rapidement) :
             </span>
             <div className="flex flex-wrap gap-1.5">
               {members.slice(0, 4).map((m) => (
@@ -198,7 +185,7 @@ export const StudentIdentificationModal: React.FC<StudentIdentificationModalProp
               className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>Valider et {actionLabel}</span>
+              <span>Valider l'identité et emprunter</span>
             </button>
           </div>
         </form>

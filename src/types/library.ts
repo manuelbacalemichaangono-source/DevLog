@@ -12,32 +12,35 @@ export type BookGenre =
 
 export type BookCondition = 'Parfait' | 'Bon' | 'Légèrement abîmé' | 'Endommagé';
 
-export type CopyStatus = 'Disponible' | 'Indisponible' | 'Réservé';
+export type CopyStatus = 'Disponible' | 'Emprunté';
 
 export interface BookCopy {
-  id: string;
+  id: string; // e.g. "liv-001-ex-1"
   copyNumber: number; // e.g. 1, 2, 3
+  copyIdentifier: string; // Identifiant lisible et unique, e.g. "EX-LIV001-01"
   bookId: string;
   barcode: string;
   status: CopyStatus;
   condition: BookCondition;
-  exactLocation: string; // e.g. "Exemplaire 2 de Peter Pan, Section C, Contes & Romans Jeunesse, Étagère 1"
+  exactLocation: string; // Emplacement physique e.g. "Section A > Romans > Étagère 1"
   borrowerName?: string;
-  reservedForName?: string;
-  reservedForMemberId?: string;
+  borrowerMemberNumber?: string;
+  borrowerMemberId?: string;
+  loanDate?: string; // Date de l'emprunt en cours
+  dueDate?: string; // Date de retour prévue
 }
 
 export interface LibraryShelf {
-  id: string; // e.g. 'etagere-a-1-1'
-  shelfNumber: number; // 1, 2, 3
-  name: string; // e.g. "Étagère 1"
+  id: string;
+  shelfNumber: number;
+  name: string;
   themeId: string;
   description?: string;
 }
 
 export interface LibraryTheme {
-  id: string; // e.g. 'theme-sf'
-  name: string; // e.g. "Science-Fiction & Anticipation"
+  id: string;
+  name: string;
   sectionId: string;
   description: string;
   icon?: string;
@@ -45,9 +48,9 @@ export interface LibraryTheme {
 }
 
 export interface LibrarySection {
-  id: string; // e.g. 'sec-a'
-  code: string; // e.g. "Section A"
-  name: string; // e.g. "Lettres & Imaginaires"
+  id: string;
+  code: string;
+  name: string;
   description: string;
   color: string;
   themes: LibraryTheme[];
@@ -59,6 +62,7 @@ export interface Book {
   title: string;
   author: string;
   genre: BookGenre;
+  keywords?: string[];
   sectionId: string;
   sectionName: string;
   themeId: string;
@@ -71,6 +75,7 @@ export interface Book {
   shelfLocation: string;
   totalCopies: number;
   availableCopies: number;
+  borrowedCopies: number;
   description: string;
   coverAccent: string;
   pages: number;
@@ -79,67 +84,60 @@ export interface Book {
   copies: BookCopy[];
 }
 
-export type MemberCategory = 'Adulte' | 'Étudiant' | 'Enfant' | 'Enseignant' | 'Senior';
+export type MemberCategory = 'Étudiant' | 'Adulte' | 'Enseignant';
 export type MemberStatus = 'Actif' | 'Suspendu' | 'Expiré';
 
 export interface Member {
   id: string;
   memberNumber: string; // Numéro de matricule unique (e.g. "ETU-2024-001")
-  firstName: string; // Prénom de l'étudiant
-  lastName: string; // Nom de l'étudiant
+  firstName: string; // Prénom
+  lastName: string; // Nom
   email?: string;
   phone?: string;
+  filiere?: string; // Optionnel : filière ou promotion
   category?: MemberCategory;
   registrationDate?: string;
-  expiryDate?: string;
   status?: MemberStatus;
   maxLoans?: number;
   notes?: string;
+  password?: string; // Mot de passe du compte bibliothèque
 }
 
-export type LoanStatus = 'En cours' | 'Rendu';
+export type LoanStatus = 'En cours' | 'En retard' | 'Terminé';
 
 export interface Loan {
   id: string;
   bookId: string;
   copyId: string;
   copyNumber: number;
+  copyIdentifier: string; // Numéro d'identification lisible de l'exemplaire
   exactLocation: string;
   bookTitle: string;
   bookAuthor: string;
   bookIsbn: string;
   memberId: string;
   memberName: string;
+  memberNumber: string; // Numéro de matricule étudiant
   memberEmail: string;
   loanDate: string; // YYYY-MM-DD
-  returnDate?: string | null;
+  dueDate: string; // YYYY-MM-DD : Date de retour prévue
+  returnDate?: string | null; // Date de retour effective lorsque rendu
   status: LoanStatus;
   conditionOnReturn?: BookCondition | null;
   notes?: string;
-}
-
-export interface Reservation {
-  id: string;
-  bookId: string;
-  copyId: string;
-  copyNumber: number;
-  bookTitle: string;
-  memberId: string;
-  memberName: string;
-  reservationDate: string;
-  status: 'Réservé' | 'Retiré' | 'Annulée';
 }
 
 export interface LibrarySettings {
   libraryName: string;
   address: string;
   defaultMaxLoans: number;
+  defaultLoanDurationDays: number; // Durée par défaut d'un emprunt en jours (ex : 14 ou 21)
 }
 
 export interface ActivityLog {
   id: string;
   timestamp: string;
-  type: 'loan' | 'return' | 'member_new' | 'book_new' | 'reservation';
+  type: 'loan' | 'return' | 'member_new' | 'book_new';
   description: string;
   actor?: string;
 }

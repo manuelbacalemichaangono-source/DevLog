@@ -1,17 +1,14 @@
 import React from 'react';
 import {
-  Compass,
-  LayoutDashboard,
-  ArrowLeftRight,
   Users,
-  BookmarkCheck,
-  Settings,
+  BookOpen,
+  ArrowLeftRight,
   Library,
   Plus,
 } from 'lucide-react';
 import { useLibrary } from '../context/LibraryContext';
 
-export type ActiveTab = 'books' | 'dashboard' | 'loans' | 'members' | 'reservations' | 'settings';
+export type ActiveTab = 'student' | 'books' | 'loans';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -28,42 +25,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   onCloseMobile,
 }) => {
-  const { stats, settings } = useLibrary();
+  const { stats } = useLibrary();
 
   const navItems = [
     {
-      id: 'books' as ActiveTab,
-      label: 'Plan & Rayons (Consultation)',
-      icon: Compass,
-      count: stats.totalTitles,
-    },
-    {
-      id: 'dashboard' as ActiveTab,
-      label: 'Tableau de bord',
-      icon: LayoutDashboard,
-    },
-    {
-      id: 'loans' as ActiveTab,
-      label: 'Prêts & Retours',
-      icon: ArrowLeftRight,
-      count: stats.activeLoansCount > 0 ? stats.activeLoansCount : undefined,
-    },
-    {
-      id: 'members' as ActiveTab,
-      label: 'Adhérents',
+      id: 'student' as ActiveTab,
+      label: 'Étudiant',
       icon: Users,
       count: stats.totalMembers,
     },
     {
-      id: 'reservations' as ActiveTab,
-      label: 'Réservations',
-      icon: BookmarkCheck,
-      count: stats.activeReservationsCount > 0 ? stats.activeReservationsCount : undefined,
+      id: 'books' as ActiveTab,
+      label: 'Ouvrage',
+      icon: BookOpen,
+      count: stats.totalTitles,
     },
     {
-      id: 'settings' as ActiveTab,
-      label: 'Paramètres & Sauvegardes',
-      icon: Settings,
+      id: 'loans' as ActiveTab,
+      label: 'Emprunt',
+      icon: ArrowLeftRight,
+      count: stats.activeLoansCount,
     },
   ];
 
@@ -92,26 +73,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
               BiblioTech
             </h1>
             <p className="text-[11px] text-slate-400 truncate mt-1">
-              SIGB · {settings.libraryName.replace('Médiathèque Municipale ', '')}
+              Tableau de Bord
             </p>
           </div>
         </div>
 
-        {/* Quick action button */}
+        {/* Quick action: Nouvel Emprunt */}
         <div className="p-4">
           <button
+            type="button"
             onClick={() => {
               onOpenNewLoan();
               onCloseMobile?.();
             }}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm focus-visible:outline-2 focus-visible:outline-indigo-500"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-3 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Nouveau Prêt</span>
+            <span>Nouvel Emprunt</span>
           </button>
         </div>
 
-        {/* Navigation list */}
+        {/* Navigation list: 3 items: Étudiant, Ouvrage, Emprunt */}
         <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -120,19 +102,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => {
                   setActiveTab(item.id);
                   onCloseMobile?.();
                 }}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                className={`w-full flex items-center justify-between px-3.5 py-3 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
                   isActive
-                    ? 'bg-slate-800 text-white font-semibold'
+                    ? 'bg-slate-800 text-white font-bold'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
-                <div className="flex items-center gap-2.5 truncate">
+                <div className="flex items-center gap-3 truncate">
                   <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-                  <span className="truncate">{item.label}</span>
+                  <span className="truncate text-sm">{item.label}</span>
                 </div>
 
                 {item.count !== undefined && (
@@ -145,16 +128,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Footer info - clean and factual */}
-        <div className="p-4 border-t border-slate-800">
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span>Prêts actifs</span>
-            <span className="font-mono tabular-nums text-slate-200 font-semibold">{stats.activeLoansCount}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5">
-            <span>Exemplaires en rayon</span>
-            <span className="font-mono tabular-nums text-slate-200 font-semibold">{stats.availableCopies}</span>
-          </div>
+        {/* Simple Footer */}
+        <div className="p-4 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+          <span>Livres prêtés</span>
+          <span className="font-mono tabular-nums text-white font-bold">{stats.activeLoansCount}</span>
         </div>
       </aside>
     </>

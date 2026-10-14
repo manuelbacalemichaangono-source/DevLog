@@ -19,6 +19,9 @@ export const MemberModal: React.FC<MemberModalProps> = ({
   const [lastName, setLastName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [memberNumber, setMemberNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [filiere, setFiliere] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,6 +29,9 @@ export const MemberModal: React.FC<MemberModalProps> = ({
       setLastName(memberToEdit.lastName || '');
       setFirstName(memberToEdit.firstName || '');
       setMemberNumber(memberToEdit.memberNumber || '');
+      setEmail(memberToEdit.email || '');
+      setPhone(memberToEdit.phone || '');
+      setFiliere(memberToEdit.filiere || '');
       setError(null);
     } else {
       const year = new Date().getFullYear();
@@ -34,6 +40,9 @@ export const MemberModal: React.FC<MemberModalProps> = ({
       setLastName('');
       setFirstName('');
       setMemberNumber(defaultMatricule);
+      setEmail('');
+      setPhone('');
+      setFiliere('Licence Universitaire');
       setError(null);
     }
   }, [memberToEdit, isOpen, members.length]);
@@ -53,7 +62,7 @@ export const MemberModal: React.FC<MemberModalProps> = ({
       return;
     }
 
-    // Vérifier l'unicité du matricule
+    // Unicité du matricule
     const duplicate = members.find(
       (m) =>
         m.memberNumber.trim().toUpperCase() === cleanMatricule &&
@@ -70,12 +79,18 @@ export const MemberModal: React.FC<MemberModalProps> = ({
         lastName: cleanNom,
         firstName: cleanPrenom,
         memberNumber: cleanMatricule,
+        email: email.trim(),
+        phone: phone.trim(),
+        filiere: filiere.trim(),
       });
     } else {
       addMember({
         lastName: cleanNom,
         firstName: cleanPrenom,
         memberNumber: cleanMatricule,
+        email: email.trim(),
+        phone: phone.trim(),
+        filiere: filiere.trim(),
       });
     }
 
@@ -83,8 +98,8 @@ export const MemberModal: React.FC<MemberModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-5 sm:p-6 shadow-2xl relative">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-5 sm:p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center gap-2">
@@ -103,19 +118,17 @@ export const MemberModal: React.FC<MemberModalProps> = ({
           </button>
         </div>
 
-        {/* Info reminder */}
         <p className="text-xs text-slate-500 mt-3">
-          Seuls les étudiants inscrits figurant dans cette liste sont autorisés à emprunter ou réserver des livres dans la bibliothèque.
+          Seuls les étudiants inscrits figurant dans cette liste sont autorisés à emprunter des livres dans la bibliothèque.
         </p>
 
         {error && (
-          <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-xs">
+          <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs">
             {error}
           </div>
         )}
 
-        {/* Form Body - Only Nom, Prénom, Numéro de matricule */}
-        <form onSubmit={handleSubmit} className="py-4 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="py-4 space-y-3.5 text-xs">
           <div>
             <label className="block font-semibold text-slate-800 mb-1">
               Numéro de matricule (identifiant unique) *
@@ -126,39 +139,79 @@ export const MemberModal: React.FC<MemberModalProps> = ({
               value={memberNumber}
               onChange={(e) => setMemberNumber(e.target.value.toUpperCase())}
               placeholder="Ex : ETU-2024-001"
-              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-mono font-bold tracking-wide focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono font-bold tracking-wide focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <span className="text-[11px] text-slate-400 mt-1 block">
-              Identifiant unique demandé lors de l'emprunt ou de la réservation.
-            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-800 mb-1">
+                Nom de famille *
+              </label>
+              <input
+                type="text"
+                required
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Ex : Martin"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-800 mb-1">
+                Prénom *
+              </label>
+              <input
+                type="text"
+                required
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Ex : Thomas"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
           </div>
 
           <div>
             <label className="block font-semibold text-slate-800 mb-1">
-              Nom de famille *
+              Filière / Promotion
             </label>
             <input
               type="text"
-              required
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              placeholder="Ex : Martin"
-              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={filiere}
+              onChange={(e) => setFiliere(e.target.value)}
+              placeholder="Ex : Informatique (L3), Lettres (M1)..."
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-800 mb-1">
-              Prénom *
-            </label>
-            <input
-              type="text"
-              required
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="Ex : Thomas"
-              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-800 mb-1">
+                Adresse e-mail
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="etudiant@univ.fr"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-800 mb-1">
+                Numéro de téléphone
+              </label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="06 12 34 56 78"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -166,13 +219,13 @@ export const MemberModal: React.FC<MemberModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
             >
               Annuler
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>{memberToEdit ? 'Enregistrer les modifications' : 'Confirmer l’inscription'}</span>
